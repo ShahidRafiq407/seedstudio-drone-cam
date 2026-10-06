@@ -188,16 +188,17 @@ header {
 
 .audio-rec-bar {
   display: flex;
+  gap: 8px;
   justify-content: center;
   margin-top: 2px;
 }
 
 .phone-rec-btn {
-  width: 100%;
+  flex: 1;
   background: rgba(255, 51, 102, 0.12);
   border: 1px solid rgba(255, 51, 102, 0.4);
   color: #ff5577;
-  padding: 8px 14px;
+  padding: 9px 12px;
   border-radius: 10px;
   font-size: 0.82rem;
   font-weight: 600;
@@ -205,13 +206,18 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   transition: all 0.2s ease;
 }
+.phone-rec-btn.video-rec-btn {
+  background: rgba(79, 172, 254, 0.12);
+  border-color: rgba(79, 172, 254, 0.4);
+  color: var(--primary);
+}
 .phone-rec-btn.recording {
-  background: var(--red);
-  color: #fff;
-  border-color: var(--red);
+  background: var(--red) !important;
+  color: #fff !important;
+  border-color: var(--red) !important;
   animation: pulse 1s infinite;
 }
 
@@ -258,10 +264,10 @@ header {
 
 .btn.sleep-btn:hover { border-color: #ffd166; color: #ffd166; }
 
-/* Telemetry Info */
+/* Telemetry Info - 5 Columns */
 .telemetry {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 8px;
 }
 

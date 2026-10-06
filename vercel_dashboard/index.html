@@ -50,8 +50,12 @@
         </button>
       </div>
 
-      <!-- Mobile Voice Recorder Button -->
+      <!-- Mobile Media Recorder Buttons -->
       <div class="audio-rec-bar">
+        <button id="btnPhoneVideoRec" class="phone-rec-btn video-rec-btn" onclick="togglePhoneVideoRecording()">
+          <span>🎥</span>
+          <span id="phoneVideoRecText">Record Video to Phone</span>
+        </button>
         <button id="btnPhoneRec" class="phone-rec-btn" onclick="togglePhoneAudioRecording()">
           <span>🔴</span>
           <span id="phoneRecText">Record Audio to Phone</span>
@@ -100,6 +104,10 @@
       <div class="tele-item">
         <div class="tele-label">Active Mode</div>
         <div id="teleMode" class="tele-val">Standby</div>
+      </div>
+      <div class="tele-item" id="batTeleBox" title="Connect 2x 100k resistors between BAT+, A0, and GND to measure voltage">
+        <div class="tele-label">Battery Level</div>
+        <div id="teleBat" class="tele-val" style="color: #ffd166;">Checking...</div>
       </div>
       <div class="tele-item" id="sdTeleBox">
         <div class="tele-label">MicroSD Card</div>

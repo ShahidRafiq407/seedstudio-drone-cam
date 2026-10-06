@@ -221,6 +221,20 @@ function updateUI(status) {
     sdEl.style.color = 'var(--red)';
   }
 
+  // Battery Status
+  const batEl = document.getElementById('teleBat');
+  if (batEl) {
+    if (status.battery_connected) {
+      batEl.innerText = `${status.battery_v}V (${status.battery_pct}%)`;
+      if (status.battery_pct > 50) batEl.style.color = 'var(--green)';
+      else if (status.battery_pct > 20) batEl.style.color = '#ffd166';
+      else batEl.style.color = 'var(--red)';
+    } else {
+      batEl.innerText = "Needs Divider on A0";
+      batEl.style.color = 'var(--text-muted)';
+    }
+  }
+
   // Active button styling
   document.getElementById('btnCam').classList.toggle('active', currentMode === 'camera');
   document.getElementById('btnMic').classList.toggle('active', currentMode === 'mic');
@@ -413,6 +427,104 @@ function savePhoneWavFile(chunks) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Record Live Video Directly on Mobile Phone (HD Canvas + MediaRecorder)
+let isPhoneVideoRecording = false;
+let mediaRecorder = null;
+let recordedVideoChunks = [];
+let videoRecTimer = null;
+let videoRecStartTime = 0;
+let recCanvas = null;
+let recDrawInterval = null;
+
+function togglePhoneVideoRecording() {
+  if (currentMode !== 'camera' && currentMode !== 'turbo') {
+    alert("Please turn on Camera or Turbo Mode first before recording video!");
+    return;
+  }
+
+  const btn = document.getElementById('btnPhoneVideoRec');
+  const txt = document.getElementById('phoneVideoRecText');
+  const videoFeed = document.getElementById('videoFeed');
+
+  if (!isPhoneVideoRecording) {
+    // Start recording video
+    isPhoneVideoRecording = true;
+    recordedVideoChunks = [];
+    videoRecStartTime = Date.now();
+    btn.classList.add('recording');
+
+    if (!recCanvas) {
+      recCanvas = document.createElement('canvas');
+      recCanvas.width = 640;
+      recCanvas.height = 480;
+    }
+    const recCtx = recCanvas.getContext('2d');
+
+    recDrawInterval = setInterval(() => {
+      if (videoFeed && videoFeed.naturalWidth) {
+        recCtx.drawImage(videoFeed, 0, 0, 640, 480);
+      }
+    }, 66); // ~15 FPS capture
+
+    const stream = recCanvas.captureStream(15);
+
+    try {
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+    } catch(e) {
+      try {
+        mediaRecorder = new MediaRecorder(stream);
+      } catch(err2) {
+        alert("Video recording not supported on this browser: " + err2.message);
+        isPhoneVideoRecording = false;
+        clearInterval(recDrawInterval);
+        btn.classList.remove('recording');
+        return;
+      }
+    }
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        recordedVideoChunks.push(e.data);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recordedVideoChunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const now = new Date();
+      const ts = now.toISOString().replace(/[-:T]/g, '_').slice(0, 15);
+      a.href = url;
+      a.download = `Drone_Video_${ts}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+
+    mediaRecorder.start(250);
+
+    videoRecTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - videoRecStartTime) / 1000);
+      const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const s = String(elapsed % 60).padStart(2, '0');
+      txt.innerText = `⏹️ Stop Video (${m}:${s})`;
+    }, 1000);
+
+  } else {
+    // Stop recording
+    isPhoneVideoRecording = false;
+    clearInterval(videoRecTimer);
+    clearInterval(recDrawInterval);
+    btn.classList.remove('recording');
+    txt.innerText = "Record Video to Phone";
+
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+  }
 }
 
 function writeString(view, offset, string) {

@@ -12,8 +12,8 @@
 // ==========================================
 // 1. WI-FI CREDENTIALS (CHANGE THESE)
 // ==========================================
-const char* WIFI_SSID     = "Shahid";
-const char* WIFI_PASSWORD = "Rafiq@5219786";
+const char* WIFI_SSID     = "Robotics";
+const char* WIFI_PASSWORD = "09876541";
 
 // Fallback SoftAP if Wi-Fi fails to connect
 const char* AP_SSID       = "XIAO-DroneCam-AP";
@@ -1026,6 +1026,47 @@ void handleRoot() {
   server.send_P(200, "text/html", INDEX_HTML);
 }
 
+#define BATTERY_ADC_PIN 1
+
+struct BatteryInfo {
+  float voltage;
+  int percentage;
+  bool isConnected;
+  String status;
+};
+
+BatteryInfo readBattery() {
+  BatteryInfo b;
+  // Read analog millivolts on GPIO 1 (A0 pin)
+  uint32_t mv = analogReadMilliVolts(BATTERY_ADC_PIN);
+  uint32_t batMv = mv * 2; // With 2:1 divider (100k + 100k resistors)
+
+  // Standard 1S LiPo operates between 3.0V (cutoff) and 4.2V (full charge)
+  if (batMv >= 2700 && batMv <= 4400) {
+    b.isConnected = true;
+    b.voltage = batMv / 1000.0f;
+    if (b.voltage >= 4.15f) b.percentage = 100;
+    else if (b.voltage >= 4.05f) b.percentage = 90;
+    else if (b.voltage >= 3.95f) b.percentage = 78; // 3.98V is ~78%
+    else if (b.voltage >= 3.85f) b.percentage = 60;
+    else if (b.voltage >= 3.75f) b.percentage = 40;
+    else if (b.voltage >= 3.65f) b.percentage = 20;
+    else if (b.voltage >= 3.50f) b.percentage = 10;
+    else b.percentage = 2;
+
+    if (b.percentage > 50) b.status = "Good";
+    else if (b.percentage > 20) b.status = "Moderate";
+    else b.status = "Low Battery";
+  } else {
+    // Divider not connected on pin A0
+    b.isConnected = false;
+    b.voltage = 0.0f;
+    b.percentage = -1;
+    b.status = "No Divider on A0";
+  }
+  return b;
+}
+
 void handleStatus() {
   addCorsHeaders();
   String modeStr;
@@ -1047,6 +1088,8 @@ void handleStatus() {
     sdCardAvailable = false;
   }
 
+  BatteryInfo bat = readBattery();
+
   String json = "{";
   json += "\"mode\":\"" + modeStr + "\",";
   json += "\"recording\":" + String(isRecording ? "true" : "false") + ",";
@@ -1054,6 +1097,10 @@ void handleStatus() {
   json += "\"sd\":" + String(sdCardAvailable ? "true" : "false") + ",";
   json += "\"sd_total_mb\":" + String((unsigned long)sdTotalMB) + ",";
   json += "\"sd_free_mb\":" + String((unsigned long)sdFreeMB) + ",";
+  json += "\"battery_v\":" + String(bat.voltage, 2) + ",";
+  json += "\"battery_pct\":" + String(bat.percentage) + ",";
+  json += "\"battery_connected\":" + String(bat.isConnected ? "true" : "false") + ",";
+  json += "\"battery_status\":\"" + bat.status + "\",";
   json += "\"free_psram\":" + String(ESP.getFreePsram()) + ",";
   json += "\"free_heap\":" + String(ESP.getFreeHeap());
   json += "}";
@@ -1373,7 +1420,7 @@ void loop() {
 
   // Continuous background recording logic (if enabled)
   if (isRecording && sdCardAvailable && cameraInitialized) {
-    if (millis() - lastRecordTime > 1000) { // 1 frame per second
+    if (millis() - lastRecordTime > 250) { // 4 frames per second video capture
       lastRecordTime = millis();
       saveSnapshotToSD();
     }
