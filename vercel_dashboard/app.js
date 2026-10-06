@@ -1,8 +1,22 @@
 let espBase = localStorage.getItem('esp32_base_url') || '';
 let currentMode = 'standby';
 let isRecording = false;
+let isSwitching = false;
+let sdMounted = false;
+
+// Audio processing nodes
 let audioCtx = null;
+let gainNode = null;
+let filterNode = null;
+let noiseFilterEnabled = true;
+let userVolume = 2.5;
 let audioInterval = null;
+
+// Phone Audio Recording variables
+let isPhoneRecording = false;
+let phoneRecordedChunks = [];
+let phoneRecStartTime = 0;
+let phoneRecTimer = null;
 
 const inputEl = document.getElementById('espUrl');
 if (espBase) {
@@ -19,7 +33,7 @@ function saveEspUrl() {
   }
   espBase = val;
   localStorage.setItem('esp32_base_url', espBase);
-  alert('Connecting to ' + espBase);
+  alert('Connected to: ' + espBase);
   fetchStatus();
 }
 
@@ -28,6 +42,7 @@ function getUrl(path) {
   return espBase + path;
 }
 
+// Waveform Canvas Setup
 const canvas = document.getElementById('audioCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -56,52 +71,157 @@ function drawWave(data) {
   ctx.stroke();
 }
 
-function toggleMode(mode) {
-  if (!espBase) return alert('Please enter ESP32 IP or URL first!');
-  const target = (currentMode === mode && mode !== 'standby') ? 'standby' : mode;
-  fetch(getUrl('/set_mode?mode=' + target))
-    .then(r => r.json())
-    .then(d => { updateUI(d); })
-    .catch(e => console.error(e));
+// Web Audio System & DSP Filters
+function initAudioPipeline() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (!gainNode) {
+    gainNode = audioCtx.createGain();
+    gainNode.gain.value = userVolume;
+  }
+  if (!filterNode) {
+    // High-pass filter at 180Hz to eliminate fan rumble and AC hum
+    filterNode = audioCtx.createBiquadFilter();
+    filterNode.type = 'highpass';
+    filterNode.frequency.value = noiseFilterEnabled ? 180 : 20;
+    filterNode.Q.value = 0.7;
+
+    filterNode.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+  }
 }
 
-function toggleRecord() {
-  if (!espBase) return alert('Please enter ESP32 IP or URL first!');
+function updateVolume(val) {
+  userVolume = parseFloat(val);
+  document.getElementById('volVal').innerText = userVolume.toFixed(1) + 'x';
+  if (gainNode) {
+    gainNode.gain.value = userVolume;
+  }
+}
+
+function toggleNoiseFilter() {
+  noiseFilterEnabled = !noiseFilterEnabled;
+  const btn = document.getElementById('btnNoiseFilter');
+  btn.classList.toggle('active', noiseFilterEnabled);
+  btn.innerText = noiseFilterEnabled ? '🍃 Fan Filter: ON' : '🍃 Fan Filter: OFF';
+  if (filterNode) {
+    filterNode.frequency.value = noiseFilterEnabled ? 180 : 20;
+  }
+}
+
+function resumeAudio() {
+  initAudioPipeline();
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+}
+
+// Mode Switching Logic
+async function handleModeClick(requestedMode) {
+  if (isSwitching) return;
+  isSwitching = true;
+
+  // Toggle behavior: If active button is clicked again, return to standby
+  let targetMode = requestedMode;
+  if (currentMode === requestedMode && requestedMode !== 'standby') {
+    targetMode = 'standby';
+  }
+
+  // 1. Immediately terminate active video & audio streams on client
+  const videoFeed = document.getElementById('videoFeed');
+  if (currentMode === 'camera' || currentMode === 'turbo') {
+    videoFeed.src = ''; // Drops TCP socket to ESP32 stream handler immediately
+    videoFeed.style.display = 'none';
+    document.getElementById('noFeedMsg').style.display = 'flex';
+  }
+  stopAudioStream();
+
+  // Allow a tiny 60ms gap for socket FIN handshake
+  await new Promise(r => setTimeout(r, 60));
+
+  // 2. Send mode change to ESP32
+  try {
+    const res = await fetch(getUrl('/set_mode?mode=' + targetMode));
+    const data = await res.json();
+    updateUI(data);
+  } catch (err) {
+    console.error('Mode switch failed:', err);
+  } finally {
+    isSwitching = false;
+  }
+}
+
+function handleRecordClick() {
+  if (!sdMounted) {
+    alert("⚠️ No MicroSD Card detected! Please insert an SD card formatted as FAT32.");
+    return;
+  }
   const action = isRecording ? 'stop' : 'start';
   fetch(getUrl('/record?action=' + action))
     .then(r => r.json())
-    .then(d => { updateUI(d); })
+    .then(d => updateUI(d))
     .catch(e => console.error(e));
 }
 
 function takeSnapshot() {
-  if (!espBase) return alert('Please enter ESP32 IP or URL first!');
+  if (!sdMounted) {
+    alert("⚠️ No MicroSD Card detected! Please insert an SD card to save snapshots.");
+    return;
+  }
   fetch(getUrl('/take_snap'))
     .then(r => r.text())
     .then(t => {
       alert(t);
       loadFiles();
-    });
+    })
+    .catch(e => alert('Failed to capture snapshot'));
 }
 
-function triggerDeepSleep() {
-  if (!espBase) return alert('Please enter ESP32 IP or URL first!');
-  if (confirm("ESP32 will enter Deep Sleep for 10 minutes to preserve battery.\nWiFi will be OFF.\nContinue?")) {
-    fetch(getUrl('/deep_sleep?minutes=10'));
-    alert("ESP32 is now in Deep Sleep. It will wake up after 10 minutes or upon pressing Reset.");
-    document.getElementById('statusBadge').innerText = "Deep Sleep";
+// Deep Sleep Modal
+function openDeepSleepModal() {
+  document.getElementById('sleepModal').style.display = 'flex';
+}
+
+function closeDeepSleepModal() {
+  document.getElementById('sleepModal').style.display = 'none';
+}
+
+function confirmDeepSleep(minutes) {
+  closeDeepSleepModal();
+  if (confirm(`ESP32 will sleep for ${minutes} minutes to save battery.\nWiFi will be OFF.\nContinue?`)) {
+    // Stop video and audio
+    document.getElementById('videoFeed').src = '';
+    stopAudioStream();
+    fetch(getUrl('/deep_sleep?minutes=' + minutes));
+    alert(`ESP32 is now in Deep Sleep for ${minutes} minutes.`);
+    document.getElementById('statusBadge').innerText = "DEEP SLEEP";
+    document.getElementById('teleMode').innerText = "DEEP SLEEP";
   }
 }
 
+// Telemetry & UI Updates
 function updateUI(status) {
   currentMode = status.mode;
   isRecording = status.recording;
+  sdMounted = !!status.sd;
 
-  document.getElementById('teleWifi').innerText = status.wifi_rssi + " dBm";
+  document.getElementById('teleWifi').innerText = (status.wifi_rssi || '--') + " dBm";
   document.getElementById('teleMode').innerText = status.mode.toUpperCase();
-  document.getElementById('teleSD').innerText = status.sd ? "Ready" : "No SD";
-  document.getElementById('teleRam').innerText = Math.round(status.free_psram / 1024) + " KB";
+  document.getElementById('teleRam').innerText = Math.round((status.free_psram || 0) / 1024) + " KB";
 
+  // SD Card status badge & text
+  const sdEl = document.getElementById('teleSD');
+  if (sdMounted) {
+    const freeGb = (status.sd_free_mb / 1024).toFixed(1);
+    sdEl.innerText = `Ready (${freeGb}GB Free)`;
+    sdEl.style.color = 'var(--green)';
+  } else {
+    sdEl.innerText = "No SD Card";
+    sdEl.style.color = 'var(--red)';
+  }
+
+  // Active button styling
   document.getElementById('btnCam').classList.toggle('active', currentMode === 'camera');
   document.getElementById('btnMic').classList.toggle('active', currentMode === 'mic');
   document.getElementById('btnTurbo').classList.toggle('active', currentMode === 'turbo');
@@ -117,13 +237,13 @@ function updateUI(status) {
     statusBadge.className = "badge";
   }
 
-  // Video feed
+  // Manage Video Stream
   const videoFeed = document.getElementById('videoFeed');
   const noFeedMsg = document.getElementById('noFeedMsg');
   if (currentMode === 'camera' || currentMode === 'turbo') {
-    const streamSrc = getUrl('/stream?t=' + Date.now());
-    if (videoFeed.src !== streamSrc) {
-      videoFeed.src = streamSrc;
+    const streamUrl = getUrl('/stream?t=' + Date.now());
+    if (videoFeed.src !== streamUrl) {
+      videoFeed.src = streamUrl;
     }
     videoFeed.style.display = 'block';
     noFeedMsg.style.display = 'none';
@@ -133,7 +253,7 @@ function updateUI(status) {
     noFeedMsg.style.display = 'flex';
   }
 
-  // Audio stream
+  // Manage Audio Stream
   if (currentMode === 'mic' || currentMode === 'turbo') {
     startAudioStream();
   } else {
@@ -141,42 +261,52 @@ function updateUI(status) {
   }
 }
 
-function resumeAudioContext() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-}
-
+// Live Audio Streaming & Playback
 function startAudioStream() {
   if (audioInterval) return;
-  resumeAudioContext();
-  document.getElementById('audioStatus').innerText = "Streaming (16kHz Active)";
+  resumeAudio();
+  document.getElementById('audioStatus').innerText = "Active (Listening)";
 
   let isFetching = false;
   audioInterval = setInterval(() => {
     if (isFetching) return;
     isFetching = true;
-    fetch(getUrl('/audio_chunk?t=' + Date.now()))
+
+    // Send gain parameter to firmware AGC
+    const gainParam = Math.round(userVolume * 10);
+    fetch(getUrl('/audio_chunk?gain=' + gainParam + '&t=' + Date.now()))
       .then(res => {
         const peak = res.headers.get('X-Peak-Volume');
         if (peak) {
-          document.getElementById('audioStatus').innerText = `Active (Peak: ${peak})`;
+          const peakNum = parseInt(peak, 10);
+          if (peakNum > 20000) {
+            document.getElementById('audioStatus').innerText = `Loud (${peak})`;
+          } else if (peakNum > 1000) {
+            document.getElementById('audioStatus').innerText = `Speech (${peak})`;
+          } else {
+            document.getElementById('audioStatus').innerText = `Quiet (${peak})`;
+          }
         }
         return res.arrayBuffer();
       })
       .then(buf => {
         isFetching = false;
         if (!buf || buf.byteLength <= 44) return;
-        resumeAudioContext();
+        resumeAudio();
+
+        // If user is recording to phone, store raw PCM
+        if (isPhoneRecording) {
+          phoneRecordedChunks.push(new Int16Array(buf.slice(44)));
+        }
+
         audioCtx.decodeAudioData(buf.slice(0), (audioBuffer) => {
           const src = audioCtx.createBufferSource();
           src.buffer = audioBuffer;
-          src.connect(audioCtx.destination);
+          // Connect through DSP Filter -> Gain Booster -> Destination
+          src.connect(filterNode);
           src.start();
 
+          // Render Waveform Canvas
           const pcm = audioBuffer.getChannelData(0);
           const sampleWave = [];
           const step = Math.floor(pcm.length / 80) || 1;
@@ -184,9 +314,7 @@ function startAudioStream() {
             sampleWave.push((pcm[i] + 1) * 128);
           }
           drawWave(sampleWave);
-        }, (err) => {
-          console.warn("Audio decode err:", err);
-        });
+        }, (err) => {});
       }).catch(e => {
         isFetching = false;
       });
@@ -202,6 +330,98 @@ function stopAudioStream() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
+// Record Audio Locally to Mobile Phone
+function togglePhoneAudioRecording() {
+  resumeAudio();
+  const btn = document.getElementById('btnPhoneRec');
+  const txt = document.getElementById('phoneRecText');
+
+  if (!isPhoneRecording) {
+    // Start recording
+    isPhoneRecording = true;
+    phoneRecordedChunks = [];
+    phoneRecStartTime = Date.now();
+    btn.classList.add('recording');
+
+    // Make sure audio is playing/fetching
+    if (currentMode !== 'mic' && currentMode !== 'turbo') {
+      handleModeClick('mic');
+    }
+
+    phoneRecTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - phoneRecStartTime) / 1000);
+      const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const s = String(elapsed % 60).padStart(2, '0');
+      txt.innerText = `⏹️ Stop & Save (${m}:${s})`;
+    }, 1000);
+  } else {
+    // Stop recording and download WAV
+    isPhoneRecording = false;
+    clearInterval(phoneRecTimer);
+    btn.classList.remove('recording');
+    txt.innerText = "Record Audio to Phone";
+
+    if (phoneRecordedChunks.length === 0) {
+      alert("No audio data recorded!");
+      return;
+    }
+
+    // Build standard WAV file in browser
+    savePhoneWavFile(phoneRecordedChunks);
+  }
+}
+
+function savePhoneWavFile(chunks) {
+  let totalSamples = 0;
+  for (let c of chunks) totalSamples += c.length;
+
+  const buffer = new ArrayBuffer(44 + totalSamples * 2);
+  const view = new DataView(buffer);
+
+  // RIFF identifier
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + totalSamples * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true); // SubChunk1Size
+  view.setUint16(20, 1, true);  // PCM format
+  view.setUint16(22, 1, true);  // Mono
+  view.setUint32(24, 16000, true); // Sample rate
+  view.setUint32(28, 32000, true); // Byte rate
+  view.setUint16(32, 2, true);  // Block align
+  view.setUint16(34, 16, true); // Bits per sample
+  writeString(view, 36, 'data');
+  view.setUint32(40, totalSamples * 2, true);
+
+  // Write PCM audio data
+  let offset = 44;
+  for (let c of chunks) {
+    for (let i = 0; i < c.length; i++) {
+      view.setInt16(offset, c[i], true);
+      offset += 2;
+    }
+  }
+
+  const blob = new Blob([buffer], { type: 'audio/wav' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const now = new Date();
+  const timestamp = now.toISOString().replace(/[-:T]/g, '_').slice(0, 15);
+  a.href = url;
+  a.download = `Audio_Voice_${timestamp}.wav`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+// MicroSD File Management
 function loadFiles() {
   if (!espBase) return;
   fetch(getUrl('/files'))
@@ -209,7 +429,7 @@ function loadFiles() {
     .then(files => {
       const fl = document.getElementById('fileList');
       if (!files || files.length === 0) {
-        fl.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:10px;">No recordings found on SD card</div>';
+        fl.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:10px;">No files on SD card</div>';
         return;
       }
       fl.innerHTML = files.map(f => `
@@ -230,6 +450,7 @@ function deleteFile(name) {
   }
 }
 
+// Telemetry Polling
 function fetchStatus() {
   if (!espBase) return;
   fetch(getUrl('/status'))

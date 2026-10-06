@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>XIAO ESP32-S3 Remote Cloud Dashboard</title>
+  <title>XIAO ESP32-S3 Drone Surveillance Hub</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="container">
     <header>
       <div class="title-box">
-        <h1>🚁 XIAO Drone & Remote Cam</h1>
+        <h1>🚁 XIAO Drone Surveillance</h1>
       </div>
       <div id="statusBadge" class="badge">Standby</div>
     </header>
 
-    <!-- Connection Config Bar -->
+    <!-- Connection Bar -->
     <div class="config-bar">
-      <input type="text" id="espUrl" placeholder="ESP32 IP or Cloudflare/Ngrok URL (e.g. http://192.168.1.50)">
+      <input type="text" id="espUrl" placeholder="ESP32 IP / Cloudflare URL (e.g. https://bee-algorithms-shapes-jose.trycloudflare.com)">
       <button class="save-btn" onclick="saveEspUrl()">Connect</button>
     </div>
 
@@ -25,66 +25,85 @@
     <div class="stream-card">
       <img id="videoFeed" alt="Camera Feed">
       <div id="noFeedMsg" class="no-feed-msg">
-        <span style="font-size: 2.5rem;">📷</span>
-        <span>Camera in Standby</span>
-        <span style="font-size: 0.75rem; color: #5a6578;">Click 'Camera ON' or 'Turbo Mode' to start live feed</span>
+        <span style="font-size: 2.8rem;">📷</span>
+        <span style="font-weight: 600; font-size: 1rem;">Camera in Standby</span>
+        <span style="font-size: 0.78rem; color: #8e9bb0;">Tap 'Camera' or 'Turbo Mode' to start live video stream</span>
       </div>
     </div>
 
-    <!-- Audio Visualizer Card -->
+    <!-- Audio Control & Whisper Booster Panel -->
     <div class="audio-card">
       <div class="audio-header">
-        <span>🎙️ PDM Microphone (16kHz)</span>
-        <span id="audioStatus">Muted</span>
+        <span>🎙️ PDM Microphone (16kHz Audio)</span>
+        <span id="audioStatus" class="audio-indicator">Muted</span>
       </div>
       <canvas id="audioCanvas"></canvas>
+      
+      <!-- Audio Tuning Controls -->
+      <div class="audio-controls-row">
+        <div class="slider-group">
+          <label for="volBoost">🔊 Whisper Boost: <span id="volVal">2.5x</span></label>
+          <input type="range" id="volBoost" min="1" max="5" step="0.5" value="2.5" oninput="updateVolume(this.value)">
+        </div>
+        <button id="btnNoiseFilter" class="chip-btn active" onclick="toggleNoiseFilter()">
+          🍃 Fan Filter: ON
+        </button>
+      </div>
+
+      <!-- Mobile Voice Recorder Button -->
+      <div class="audio-rec-bar">
+        <button id="btnPhoneRec" class="phone-rec-btn" onclick="togglePhoneAudioRecording()">
+          <span>🔴</span>
+          <span id="phoneRecText">Record Audio to Phone</span>
+        </button>
+      </div>
     </div>
 
-    <!-- Controls -->
+    <!-- Main Mode Buttons -->
     <div class="controls-grid">
-      <button id="btnCam" class="btn" onclick="toggleMode('camera')">
+      <button id="btnCam" class="btn" onclick="handleModeClick('camera')">
         <span>📷</span>
         Camera
       </button>
-      <button id="btnMic" class="btn" onclick="toggleMode('mic')">
+      <button id="btnMic" class="btn" onclick="handleModeClick('mic')">
         <span>🎙️</span>
         Mic
       </button>
-      <button id="btnTurbo" class="btn" onclick="toggleMode('turbo')">
+      <button id="btnTurbo" class="btn" onclick="handleModeClick('turbo')">
         <span>⚡</span>
         Turbo Mode
       </button>
-      <button id="btnRec" class="btn rec-btn" onclick="toggleRecord()">
+      <button id="btnRec" class="btn rec-btn" onclick="handleRecordClick()">
         <span>⏺️</span>
         SD Record
       </button>
-      <button class="btn" onclick="takeSnapshot()">
+      <button id="btnSnap" class="btn" onclick="takeSnapshot()">
         <span>📸</span>
         Snapshot
       </button>
-      <button id="btnStandby" class="btn sleep-btn" onclick="toggleMode('standby')">
+      <button id="btnStandby" class="btn sleep-btn" onclick="handleModeClick('standby')">
         <span>🍃</span>
         Light Sleep
       </button>
-      <button class="btn sleep-btn" onclick="triggerDeepSleep()">
+      <button id="btnDeepSleep" class="btn sleep-btn" onclick="openDeepSleepModal()">
         <span>🌙</span>
         Deep Sleep
       </button>
     </div>
 
-    <!-- Telemetry -->
+    <!-- Telemetry Badges -->
     <div class="telemetry">
       <div class="tele-item">
-        <div class="tele-label">Wi-Fi RSSI</div>
+        <div class="tele-label">Wi-Fi Signal</div>
         <div id="teleWifi" class="tele-val">-- dBm</div>
       </div>
       <div class="tele-item">
-        <div class="tele-label">Mode</div>
+        <div class="tele-label">Active Mode</div>
         <div id="teleMode" class="tele-val">Standby</div>
       </div>
-      <div class="tele-item">
-        <div class="tele-label">SD Card</div>
-        <div id="teleSD" class="tele-val">--</div>
+      <div class="tele-item" id="sdTeleBox">
+        <div class="tele-label">MicroSD Card</div>
+        <div id="teleSD" class="tele-val" style="color: #ff3366;">Checking...</div>
       </div>
       <div class="tele-item">
         <div class="tele-label">Free PSRAM</div>
@@ -92,7 +111,7 @@
       </div>
     </div>
 
-    <!-- MicroSD Explorer -->
+    <!-- MicroSD Gallery Panel -->
     <div class="sd-card-panel">
       <h3>
         <span>📁 MicroSD Storage Recordings</span>
@@ -100,6 +119,23 @@
       </h3>
       <div id="fileList" class="file-list">
         <div style="text-align:center; color:var(--text-muted); padding:10px;">Connect ESP32 to list files</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deep Sleep Duration Dialog -->
+  <div id="sleepModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h3>🌙 Enter Deep Sleep Mode</h3>
+      <p style="font-size: 0.85rem; color: #a0aec0; margin: 10px 0;">ESP32 Wi-Fi and CPU will turn OFF to preserve battery. It will auto-wake after:</p>
+      <div class="sleep-opts">
+        <button class="opt-btn" onclick="confirmDeepSleep(5)">5 Minutes</button>
+        <button class="opt-btn active" onclick="confirmDeepSleep(10)">10 Minutes</button>
+        <button class="opt-btn" onclick="confirmDeepSleep(30)">30 Minutes</button>
+        <button class="opt-btn" onclick="confirmDeepSleep(60)">1 Hour</button>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px;">
+        <button class="opt-btn" onclick="closeDeepSleepModal()">Cancel</button>
       </div>
     </div>
   </div>

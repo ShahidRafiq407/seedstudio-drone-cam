@@ -12,8 +12,8 @@
 // ==========================================
 // 1. WI-FI CREDENTIALS (CHANGE THESE)
 // ==========================================
-const char* WIFI_SSID     = "Robotics";
-const char* WIFI_PASSWORD = "09876541";
+const char* WIFI_SSID     = "Shahid";
+const char* WIFI_PASSWORD = "Rafiq@5219786";
 
 // Fallback SoftAP if Wi-Fi fails to connect
 const char* AP_SSID       = "XIAO-DroneCam-AP";
@@ -243,12 +243,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>XIAO ESP32-S3 Surveillance Dashboard</title>
+  <title>XIAO ESP32-S3 Drone Surveillance Hub</title>
   <style>
     :root {
       --bg: #090d16;
-      --card: rgba(22, 30, 49, 0.75);
-      --card-border: rgba(255, 255, 255, 0.08);
+      --card: rgba(22, 30, 49, 0.85);
+      --card-border: rgba(255, 255, 255, 0.09);
       --accent: #00f2fe;
       --accent-glow: rgba(0, 242, 254, 0.35);
       --primary: #4facfe;
@@ -260,17 +260,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body {
-      background: radial-gradient(circle at top, #131b2e 0%, var(--bg) 100%);
+      background: radial-gradient(circle at top, #141f38 0%, var(--bg) 100%);
       color: var(--text);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 15px;
+      padding: 12px;
     }
-    .container { width: 100%; max-width: 800px; display: flex; flex-direction: column; gap: 15px; }
-    
-    /* Header */
+    .container { width: 100%; max-width: 820px; display: flex; flex-direction: column; gap: 14px; }
     header {
       display: flex;
       justify-content: space-between;
@@ -281,16 +279,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       border-radius: 14px;
       backdrop-filter: blur(12px);
     }
-    .title-box h1 { font-size: 1.15rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px; }
+    .title-box h1 { font-size: 1.15rem; font-weight: 700; color: #fff; }
     .badge {
       font-size: 0.72rem;
-      padding: 3px 8px;
+      padding: 4px 10px;
       border-radius: 20px;
       background: rgba(0, 242, 254, 0.15);
       color: var(--accent);
       border: 1px solid var(--accent);
       text-transform: uppercase;
       font-weight: 600;
+      transition: all 0.3s ease;
     }
     .badge.rec-active {
       background: var(--red);
@@ -302,8 +301,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.75; transform: scale(0.97); }
     }
-
-    /* Video Feed */
     .stream-card {
       position: relative;
       width: 100%;
@@ -315,7 +312,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       align-items: center;
       justify-content: center;
       border: 1px solid var(--card-border);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
     }
     #videoFeed {
       width: 100%;
@@ -327,12 +324,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       color: var(--text-muted);
-      font-size: 0.9rem;
+      text-align: center;
     }
-
-    /* Audio Equalizer Visualizer */
     .audio-card {
       background: var(--card);
       border: 1px solid var(--card-border);
@@ -341,15 +336,74 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       backdrop-filter: blur(12px);
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
     }
     .audio-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: var(--text-muted); }
-    #audioCanvas { width: 100%; height: 50px; background: rgba(0,0,0,0.3); border-radius: 8px; }
-
-    /* Control Grid */
+    .audio-indicator { font-weight: 600; color: var(--accent); }
+    #audioCanvas { width: 100%; height: 50px; background: rgba(0,0,0,0.4); border-radius: 8px; }
+    .audio-controls-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+    .slider-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.82rem;
+      color: var(--text);
+    }
+    .slider-group input[type="range"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+      width: 120px;
+    }
+    .chip-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .chip-btn.active {
+      background: rgba(0, 230, 118, 0.15);
+      color: var(--green);
+      border-color: var(--green);
+    }
+    .audio-rec-bar { display: flex; justify-content: center; margin-top: 2px; }
+    .phone-rec-btn {
+      width: 100%;
+      background: rgba(255, 51, 102, 0.12);
+      border: 1px solid rgba(255, 51, 102, 0.4);
+      color: #ff5577;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+    .phone-rec-btn.recording {
+      background: var(--red);
+      color: #fff;
+      border-color: var(--red);
+      animation: pulse 1s infinite;
+    }
     .controls-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
       gap: 10px;
     }
     .btn {
@@ -365,25 +419,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       flex-direction: column;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s ease;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       backdrop-filter: blur(8px);
     }
-    .btn span { font-size: 1.3rem; }
+    .btn span { font-size: 1.35rem; }
     .btn:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .btn:active { transform: scale(0.96); }
     .btn.active {
       background: linear-gradient(135deg, var(--primary), var(--accent));
       color: #000;
       border-color: transparent;
-      box-shadow: 0 0 15px var(--accent-glow);
+      box-shadow: 0 0 16px var(--accent-glow);
     }
     .btn.rec-btn.active {
       background: var(--red);
       color: #fff;
-      box-shadow: 0 0 15px var(--red-glow);
+      box-shadow: 0 0 16px var(--red-glow);
     }
     .btn.sleep-btn:hover { border-color: #ffd166; color: #ffd166; }
-
-    /* Telemetry Info */
     .telemetry {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -392,14 +445,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     .tele-item {
       background: var(--card);
       border: 1px solid var(--card-border);
-      padding: 10px;
+      padding: 10px 8px;
       border-radius: 10px;
       text-align: center;
     }
     .tele-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 2px; }
-    .tele-val { font-size: 0.95rem; font-weight: 700; color: #fff; }
-
-    /* SD File Explorer */
+    .tele-val { font-size: 0.88rem; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sd-card-panel {
       background: var(--card);
       border: 1px solid var(--card-border);
@@ -412,9 +463,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: rgba(0,0,0,0.3);
-      padding: 6px 12px;
-      border-radius: 6px;
+      background: rgba(0,0,0,0.35);
+      padding: 7px 12px;
+      border-radius: 8px;
       font-size: 0.8rem;
     }
     .file-actions a, .file-actions button {
@@ -427,93 +478,146 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       font-size: 0.8rem;
     }
     .file-actions button.del-btn { color: var(--red); }
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      backdrop-filter: blur(6px);
+    }
+    .modal-content {
+      background: #111827;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 20px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    }
+    .sleep-opts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .opt-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .opt-btn:hover, .opt-btn.active {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
       <div class="title-box">
-        <h1>🚁 XIAO ESP32-S3</h1>
+        <h1>🚁 XIAO Drone Surveillance</h1>
       </div>
       <div id="statusBadge" class="badge">Standby</div>
     </header>
 
-    <!-- Video Display -->
     <div class="stream-card">
       <img id="videoFeed" alt="Camera Feed">
       <div id="noFeedMsg" class="no-feed-msg">
-        <span style="font-size: 2.2rem;">📷</span>
-        <span>Camera in Standby</span>
-        <span style="font-size: 0.75rem; color: #5a6578;">Click 'Camera ON' or 'Turbo Mode' to start live feed</span>
+        <span style="font-size: 2.8rem;">📷</span>
+        <span style="font-weight: 600; font-size: 1rem;">Camera in Standby</span>
+        <span style="font-size: 0.78rem; color: #8e9bb0;">Tap 'Camera' or 'Turbo Mode' to start live video stream</span>
       </div>
     </div>
 
-    <!-- Audio Visualizer -->
     <div class="audio-card">
       <div class="audio-header">
-        <span>🎙️ PDM Microphone Audio</span>
-        <span id="audioStatus">Muted</span>
+        <span>🎙️ PDM Microphone (16kHz Audio)</span>
+        <span id="audioStatus" class="audio-indicator">Muted</span>
       </div>
       <canvas id="audioCanvas"></canvas>
+      
+      <div class="audio-controls-row">
+        <div class="slider-group">
+          <label for="volBoost">🔊 Whisper Boost: <span id="volVal">2.5x</span></label>
+          <input type="range" id="volBoost" min="1" max="5" step="0.5" value="2.5" oninput="updateVolume(this.value)">
+        </div>
+        <button id="btnNoiseFilter" class="chip-btn active" onclick="toggleNoiseFilter()">
+          🍃 Fan Filter: ON
+        </button>
+      </div>
+
+      <div class="audio-rec-bar">
+        <button id="btnPhoneRec" class="phone-rec-btn" onclick="togglePhoneAudioRecording()">
+          <span>🔴</span>
+          <span id="phoneRecText">Record Audio to Phone</span>
+        </button>
+      </div>
     </div>
 
-    <!-- Main Controls -->
     <div class="controls-grid">
-      <button id="btnCam" class="btn" onclick="toggleMode('camera')">
+      <button id="btnCam" class="btn" onclick="handleModeClick('camera')">
         <span>📷</span>
         Camera
       </button>
-      <button id="btnMic" class="btn" onclick="toggleMode('mic')">
+      <button id="btnMic" class="btn" onclick="handleModeClick('mic')">
         <span>🎙️</span>
         Mic
       </button>
-      <button id="btnTurbo" class="btn" onclick="toggleMode('turbo')">
+      <button id="btnTurbo" class="btn" onclick="handleModeClick('turbo')">
         <span>⚡</span>
         Turbo Mode
       </button>
-      <button id="btnRec" class="btn rec-btn" onclick="toggleRecord()">
+      <button id="btnRec" class="btn rec-btn" onclick="handleRecordClick()">
         <span>⏺️</span>
         SD Record
       </button>
-      <button class="btn" onclick="takeSnapshot()">
+      <button id="btnSnap" class="btn" onclick="takeSnapshot()">
         <span>📸</span>
         Snapshot
       </button>
-      <button id="btnStandby" class="btn sleep-btn" onclick="toggleMode('standby')">
+      <button id="btnStandby" class="btn sleep-btn" onclick="handleModeClick('standby')">
         <span>🍃</span>
         Light Sleep
       </button>
-      <button class="btn sleep-btn" onclick="triggerDeepSleep()">
+      <button id="btnDeepSleep" class="btn sleep-btn" onclick="openDeepSleepModal()">
         <span>🌙</span>
         Deep Sleep
       </button>
     </div>
 
-    <!-- Telemetry -->
     <div class="telemetry">
       <div class="tele-item">
-        <div class="tele-label">Wi-Fi RSSI</div>
+        <div class="tele-label">Wi-Fi Signal</div>
         <div id="teleWifi" class="tele-val">-- dBm</div>
       </div>
       <div class="tele-item">
-        <div class="tele-label">Mode</div>
+        <div class="tele-label">Active Mode</div>
         <div id="teleMode" class="tele-val">Standby</div>
       </div>
-      <div class="tele-item">
-        <div class="tele-label">SD Card</div>
-        <div id="teleSD" class="tele-val">--</div>
+      <div class="tele-item" id="sdTeleBox">
+        <div class="tele-label">MicroSD Card</div>
+        <div id="teleSD" class="tele-val" style="color: #ff3366;">Checking...</div>
       </div>
       <div class="tele-item">
-        <div class="tele-label">PSRAM Free</div>
+        <div class="tele-label">Free PSRAM</div>
         <div id="teleRam" class="tele-val">-- KB</div>
       </div>
     </div>
 
-    <!-- SD Card File Gallery -->
     <div class="sd-card-panel">
       <h3>
         <span>📁 MicroSD Storage Recordings</span>
-        <button style="background:transparent; border:1px solid var(--accent); color:var(--accent); padding:2px 8px; border-radius:6px; cursor:pointer;" onclick="loadFiles()">Refresh</button>
+        <button class="chip-btn" onclick="loadFiles()">Refresh</button>
       </h3>
       <div id="fileList" class="file-list">
         <div style="text-align:center; color:var(--text-muted); padding:10px;">Click refresh to list SD files</div>
@@ -521,11 +625,40 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </div>
   </div>
 
+  <div id="sleepModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h3>🌙 Enter Deep Sleep Mode</h3>
+      <p style="font-size: 0.85rem; color: #a0aec0; margin: 10px 0;">ESP32 Wi-Fi and CPU will turn OFF to preserve battery. It will auto-wake after:</p>
+      <div class="sleep-opts">
+        <button class="opt-btn" onclick="confirmDeepSleep(5)">5 Minutes</button>
+        <button class="opt-btn active" onclick="confirmDeepSleep(10)">10 Minutes</button>
+        <button class="opt-btn" onclick="confirmDeepSleep(30)">30 Minutes</button>
+        <button class="opt-btn" onclick="confirmDeepSleep(60)">1 Hour</button>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px;">
+        <button class="opt-btn" onclick="closeDeepSleepModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentMode = 'standby';
     let isRecording = false;
+    let isSwitching = false;
+    let sdMounted = false;
+
     let audioCtx = null;
+    let gainNode = null;
+    let filterNode = null;
+    let noiseFilterEnabled = true;
+    let userVolume = 2.5;
     let audioInterval = null;
+
+    let isPhoneRecording = false;
+    let phoneRecordedChunks = [];
+    let phoneRecStartTime = 0;
+    let phoneRecTimer = null;
+
     const canvas = document.getElementById('audioCanvas');
     const ctx = canvas.getContext('2d');
 
@@ -554,49 +687,127 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       ctx.stroke();
     }
 
-    function toggleMode(mode) {
-      const target = (currentMode === mode && mode !== 'standby') ? 'standby' : mode;
-      fetch('/set_mode?mode=' + target)
-        .then(r => r.json())
-        .then(d => { updateUI(d); })
-        .catch(e => console.error(e));
+    function initAudioPipeline() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (!gainNode) {
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = userVolume;
+      }
+      if (!filterNode) {
+        filterNode = audioCtx.createBiquadFilter();
+        filterNode.type = 'highpass';
+        filterNode.frequency.value = noiseFilterEnabled ? 180 : 20;
+        filterNode.Q.value = 0.7;
+
+        filterNode.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+      }
     }
 
-    function toggleRecord() {
+    function updateVolume(val) {
+      userVolume = parseFloat(val);
+      document.getElementById('volVal').innerText = userVolume.toFixed(1) + 'x';
+      if (gainNode) gainNode.gain.value = userVolume;
+    }
+
+    function toggleNoiseFilter() {
+      noiseFilterEnabled = !noiseFilterEnabled;
+      const btn = document.getElementById('btnNoiseFilter');
+      btn.classList.toggle('active', noiseFilterEnabled);
+      btn.innerText = noiseFilterEnabled ? '🍃 Fan Filter: ON' : '🍃 Fan Filter: OFF';
+      if (filterNode) filterNode.frequency.value = noiseFilterEnabled ? 180 : 20;
+    }
+
+    function resumeAudio() {
+      initAudioPipeline();
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    async function handleModeClick(requestedMode) {
+      if (isSwitching) return;
+      isSwitching = true;
+
+      let targetMode = requestedMode;
+      if (currentMode === requestedMode && requestedMode !== 'standby') {
+        targetMode = 'standby';
+      }
+
+      const videoFeed = document.getElementById('videoFeed');
+      if (currentMode === 'camera' || currentMode === 'turbo') {
+        videoFeed.src = '';
+        videoFeed.style.display = 'none';
+        document.getElementById('noFeedMsg').style.display = 'flex';
+      }
+      stopAudioStream();
+
+      await new Promise(r => setTimeout(r, 60));
+
+      try {
+        const res = await fetch('/set_mode?mode=' + targetMode);
+        const data = await res.json();
+        updateUI(data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        isSwitching = false;
+      }
+    }
+
+    function handleRecordClick() {
+      if (!sdMounted) {
+        alert("⚠️ No MicroSD Card detected! Please insert an SD card formatted as FAT32.");
+        return;
+      }
       const action = isRecording ? 'stop' : 'start';
-      fetch('/record?action=' + action)
-        .then(r => r.json())
-        .then(d => { updateUI(d); })
-        .catch(e => console.error(e));
+      fetch('/record?action=' + action).then(r => r.json()).then(d => updateUI(d));
     }
 
     function takeSnapshot() {
-      fetch('/take_snap')
-        .then(r => r.text())
-        .then(t => {
-          alert(t);
-          loadFiles();
-        });
+      if (!sdMounted) {
+        alert("⚠️ No MicroSD Card detected! Please insert an SD card to save snapshots.");
+        return;
+      }
+      fetch('/take_snap').then(r => r.text()).then(t => { alert(t); loadFiles(); });
     }
 
-    function triggerDeepSleep() {
-      if (confirm("ESP32 will enter ultra-low power Deep Sleep for 10 minutes to save battery.\nWiFi will be OFF.\nContinue?")) {
-        fetch('/deep_sleep?minutes=10');
-        alert("ESP32 is now in Deep Sleep. It will wake up automatically after 10 minutes or upon pressing Reset.");
-        document.getElementById('statusBadge').innerText = "Deep Sleep";
+    function openDeepSleepModal() {
+      document.getElementById('sleepModal').style.display = 'flex';
+    }
+    function closeDeepSleepModal() {
+      document.getElementById('sleepModal').style.display = 'none';
+    }
+    function confirmDeepSleep(minutes) {
+      closeDeepSleepModal();
+      if (confirm(`ESP32 will sleep for ${minutes} minutes to save battery.\nWiFi will be OFF.\nContinue?`)) {
+        document.getElementById('videoFeed').src = '';
+        stopAudioStream();
+        fetch('/deep_sleep?minutes=' + minutes);
+        alert(`ESP32 is now in Deep Sleep for ${minutes} minutes.`);
+        document.getElementById('statusBadge').innerText = "DEEP SLEEP";
       }
     }
 
     function updateUI(status) {
       currentMode = status.mode;
       isRecording = status.recording;
+      sdMounted = !!status.sd;
 
-      document.getElementById('teleWifi').innerText = status.wifi_rssi + " dBm";
+      document.getElementById('teleWifi').innerText = (status.wifi_rssi || '--') + " dBm";
       document.getElementById('teleMode').innerText = status.mode.toUpperCase();
-      document.getElementById('teleSD').innerText = status.sd ? "Ready" : "No SD";
-      document.getElementById('teleRam').innerText = Math.round(status.free_psram / 1024) + " KB";
+      document.getElementById('teleRam').innerText = Math.round((status.free_psram || 0) / 1024) + " KB";
 
-      // Buttons active classes
+      const sdEl = document.getElementById('teleSD');
+      if (sdMounted) {
+        const freeGb = (status.sd_free_mb / 1024).toFixed(1);
+        sdEl.innerText = `Ready (${freeGb}GB Free)`;
+        sdEl.style.color = 'var(--green)';
+      } else {
+        sdEl.innerText = "No SD Card";
+        sdEl.style.color = 'var(--red)';
+      }
+
       document.getElementById('btnCam').classList.toggle('active', currentMode === 'camera');
       document.getElementById('btnMic').classList.toggle('active', currentMode === 'mic');
       document.getElementById('btnTurbo').classList.toggle('active', currentMode === 'turbo');
@@ -612,13 +823,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         statusBadge.className = "badge";
       }
 
-      // Video handling
       const videoFeed = document.getElementById('videoFeed');
       const noFeedMsg = document.getElementById('noFeedMsg');
       if (currentMode === 'camera' || currentMode === 'turbo') {
-        if (!videoFeed.src.includes('/stream')) {
-          videoFeed.src = '/stream?t=' + Date.now();
-        }
+        const streamUrl = '/stream?t=' + Date.now();
+        if (videoFeed.src !== streamUrl) videoFeed.src = streamUrl;
         videoFeed.style.display = 'block';
         noFeedMsg.style.display = 'none';
       } else {
@@ -627,7 +836,6 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         noFeedMsg.style.display = 'flex';
       }
 
-      // Audio handling
       if (currentMode === 'mic' || currentMode === 'turbo') {
         startAudioStream();
       } else {
@@ -635,41 +843,43 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       }
     }
 
-    function resumeAudioContext() {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-    }
-
     function startAudioStream() {
       if (audioInterval) return;
-      resumeAudioContext();
-      document.getElementById('audioStatus').innerText = "Streaming (16kHz Active)";
-      
+      resumeAudio();
+      document.getElementById('audioStatus').innerText = "Active (Listening)";
+
       let isFetching = false;
       audioInterval = setInterval(() => {
         if (isFetching) return;
         isFetching = true;
-        fetch('/audio_chunk?t=' + Date.now())
+
+        const gainParam = Math.round(userVolume * 10);
+        fetch('/audio_chunk?gain=' + gainParam + '&t=' + Date.now())
           .then(res => {
             const peak = res.headers.get('X-Peak-Volume');
             if (peak) {
-              document.getElementById('audioStatus').innerText = `Active (Peak: ${peak})`;
+              const peakNum = parseInt(peak, 10);
+              if (peakNum > 20000) document.getElementById('audioStatus').innerText = `Loud (${peak})`;
+              else if (peakNum > 1000) document.getElementById('audioStatus').innerText = `Speech (${peak})`;
+              else document.getElementById('audioStatus').innerText = `Quiet (${peak})`;
             }
             return res.arrayBuffer();
           })
           .then(buf => {
             isFetching = false;
             if (!buf || buf.byteLength <= 44) return;
-            resumeAudioContext();
+            resumeAudio();
+
+            if (isPhoneRecording) {
+              phoneRecordedChunks.push(new Int16Array(buf.slice(44)));
+            }
+
             audioCtx.decodeAudioData(buf.slice(0), (audioBuffer) => {
               const src = audioCtx.createBufferSource();
               src.buffer = audioBuffer;
-              src.connect(audioCtx.destination);
+              src.connect(filterNode);
               src.start();
+
               const pcm = audioBuffer.getChannelData(0);
               const sampleWave = [];
               const step = Math.floor(pcm.length / 80) || 1;
@@ -678,9 +888,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
               }
               drawWave(sampleWave);
             }, (err) => {});
-          }).catch(e => {
-            isFetching = false;
-          });
+          }).catch(e => { isFetching = false; });
       }, 450);
     }
 
@@ -693,25 +901,99 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
+    function togglePhoneAudioRecording() {
+      resumeAudio();
+      const btn = document.getElementById('btnPhoneRec');
+      const txt = document.getElementById('phoneRecText');
+
+      if (!isPhoneRecording) {
+        isPhoneRecording = true;
+        phoneRecordedChunks = [];
+        phoneRecStartTime = Date.now();
+        btn.classList.add('recording');
+        if (currentMode !== 'mic' && currentMode !== 'turbo') handleModeClick('mic');
+
+        phoneRecTimer = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - phoneRecStartTime) / 1000);
+          const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+          const s = String(elapsed % 60).padStart(2, '0');
+          txt.innerText = `⏹️ Stop & Save (${m}:${s})`;
+        }, 1000);
+      } else {
+        isPhoneRecording = false;
+        clearInterval(phoneRecTimer);
+        btn.classList.remove('recording');
+        txt.innerText = "Record Audio to Phone";
+        if (phoneRecordedChunks.length === 0) { alert("No audio data!"); return; }
+        savePhoneWavFile(phoneRecordedChunks);
+      }
+    }
+
+    function savePhoneWavFile(chunks) {
+      let totalSamples = 0;
+      for (let c of chunks) totalSamples += c.length;
+
+      const buffer = new ArrayBuffer(44 + totalSamples * 2);
+      const view = new DataView(buffer);
+
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + totalSamples * 2, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, 16000, true);
+      view.setUint32(28, 32000, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, totalSamples * 2, true);
+
+      let offset = 44;
+      for (let c of chunks) {
+        for (let i = 0; i < c.length; i++) {
+          view.setInt16(offset, c[i], true);
+          offset += 2;
+        }
+      }
+
+      const blob = new Blob([buffer], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const now = new Date();
+      const ts = now.toISOString().replace(/[-:T]/g, '_').slice(0, 15);
+      a.href = url;
+      a.download = `Audio_Voice_${ts}.wav`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
     function loadFiles() {
-      fetch('/files')
-        .then(r => r.json())
-        .then(files => {
-          const fl = document.getElementById('fileList');
-          if (!files || files.length === 0) {
-            fl.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:10px;">No recordings found on SD card</div>';
-            return;
-          }
-          fl.innerHTML = files.map(f => `
-            <div class="file-item">
-              <span>📄 ${f.name} (${Math.round(f.size/1024)} KB)</span>
-              <div class="file-actions">
-                <a href="/file?name=${f.name}" target="_blank" download>Download</a>
-                <button class="del-btn" onclick="deleteFile('${f.name}')">Delete</button>
-              </div>
+      fetch('/files').then(r => r.json()).then(files => {
+        const fl = document.getElementById('fileList');
+        if (!files || files.length === 0) {
+          fl.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:10px;">No files on SD card</div>';
+          return;
+        }
+        fl.innerHTML = files.map(f => `
+          <div class="file-item">
+            <span>📄 ${f.name} (${Math.round(f.size/1024)} KB)</span>
+            <div class="file-actions">
+              <a href="/file?name=${f.name}" target="_blank" download>Download</a>
+              <button class="del-btn" onclick="deleteFile('${f.name}')">Delete</button>
             </div>
-          `).join('');
-        }).catch(e => console.error(e));
+          </div>
+        `).join('');
+      }).catch(e => console.error(e));
     }
 
     function deleteFile(name) {
@@ -720,15 +1002,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       }
     }
 
-    // Polling telemetry
     setInterval(() => {
-      fetch('/status')
-        .then(r => r.json())
-        .then(d => updateUI(d))
-        .catch(e => {});
+      fetch('/status').then(r => r.json()).then(d => updateUI(d)).catch(e => {});
     }, 3000);
 
-    // Initial status fetch
     fetch('/status').then(r => r.json()).then(d => updateUI(d));
   </script>
 </body>
@@ -759,11 +1036,24 @@ void handleStatus() {
     default:           modeStr = "standby"; break;
   }
 
+  // Dynamically verify SD card status and space
+  uint64_t sdTotalMB = 0;
+  uint64_t sdFreeMB = 0;
+  if (sdCardAvailable && SD.cardType() != CARD_NONE) {
+    sdTotalMB = SD.totalBytes() / (1024ULL * 1024ULL);
+    uint64_t used = SD.usedBytes() / (1024ULL * 1024ULL);
+    sdFreeMB = (sdTotalMB > used) ? (sdTotalMB - used) : 0;
+  } else {
+    sdCardAvailable = false;
+  }
+
   String json = "{";
   json += "\"mode\":\"" + modeStr + "\",";
   json += "\"recording\":" + String(isRecording ? "true" : "false") + ",";
   json += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
   json += "\"sd\":" + String(sdCardAvailable ? "true" : "false") + ",";
+  json += "\"sd_total_mb\":" + String((unsigned long)sdTotalMB) + ",";
+  json += "\"sd_free_mb\":" + String((unsigned long)sdFreeMB) + ",";
   json += "\"free_psram\":" + String(ESP.getFreePsram()) + ",";
   json += "\"free_heap\":" + String(ESP.getFreeHeap());
   json += "}";
@@ -799,7 +1089,7 @@ void handleRecord() {
 void handleTakeSnap() {
   addCorsHeaders();
   if (!sdCardAvailable) {
-    server.send(200, "text/plain", "Error: SD Card not available");
+    server.send(200, "text/plain", "Error: No SD Card Inserted");
     return;
   }
   saveSnapshotToSD();
@@ -818,7 +1108,7 @@ void handleDeepSleep() {
   triggerDeepSleep(mins);
 }
 
-// MJPEG Stream Handler
+// MJPEG Stream Handler with clean timeout & rapid exit
 void handleStream() {
   addCorsHeaders();
   if (!cameraInitialized) {
@@ -827,11 +1117,13 @@ void handleStream() {
   }
 
   WiFiClient client = server.client();
+  client.setTimeout(1); // 1 second network timeout
   client.print("HTTP/1.1 200 OK\r\n"
                "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
                "Access-Control-Allow-Origin: *\r\n\r\n");
 
   while (client.connected()) {
+    // If mode changed away from video, exit stream immediately
     if (currentMode != MODE_CAMERA && currentMode != MODE_TURBO) {
       break;
     }
@@ -841,14 +1133,16 @@ void handleStream() {
       continue;
     }
 
-    client.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + String(fb->len) + "\r\n\r\n");
-    client.write(fb->buf, fb->len);
+    size_t w = client.print("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + String(fb->len) + "\r\n\r\n");
+    if (w == 0) { esp_camera_fb_return(fb); break; }
+    w = client.write(fb->buf, fb->len);
+    if (w == 0) { esp_camera_fb_return(fb); break; }
     client.print("\r\n");
     esp_camera_fb_return(fb);
 
-    // Yield to avoid watchdog trigger
     yield();
   }
+  client.stop();
 }
 
 // Single Photo Capture
@@ -871,13 +1165,13 @@ void handleCapture() {
   esp_camera_fb_return(fb);
 }
 
-// Audio Chunk Handler (Returns 0.5s of 16kHz 16-bit WAV with Digital Gain)
+// Audio Chunk Handler with DSP Fan Filter & Whisper AGC Boost
 void handleAudioChunk() {
   addCorsHeaders();
   const size_t sampleCount = 8000; // 0.5 second at 16000Hz
   const size_t pcmBytes = sampleCount * sizeof(int16_t);
   
-  // CRITICAL: DMA buffers MUST be allocated in internal SRAM (malloc), NOT PSRAM!
+  // Allocate in internal SRAM for I2S DMA
   int16_t *pcmBuffer = (int16_t*)malloc(pcmBytes);
   if (!pcmBuffer) {
     server.send(500, "text/plain", "Audio internal RAM allocation failed");
@@ -890,13 +1184,45 @@ void handleAudioChunk() {
   int16_t peakVal = 0;
   if (r == ESP_OK && bytesRead > 0) {
     size_t samples = bytesRead / sizeof(int16_t);
-    // Apply digital volume gain (16x amplification with saturation limit)
-    for (size_t i = 0; i < samples; i++) {
-      int32_t amplified = (int32_t)pcmBuffer[i] * 16;
-      if (amplified > 32767) amplified = 32767;
-      else if (amplified < -32768) amplified = -32768;
-      pcmBuffer[i] = (int16_t)amplified;
 
+    // 1. First pass: Measure ambient level to auto-detect whispers
+    float maxAmp = 0.0f;
+    for (size_t i = 0; i < samples; i++) {
+      float a = fabsf((float)pcmBuffer[i]);
+      if (a > maxAmp) maxAmp = a;
+    }
+
+    // 2. Adaptive Gain Control (AGC)
+    // If whisper detected (maxAmp < 250), boost up to 36x!
+    // If user provided gain in query parameter (?gain=X), use that.
+    float targetGain = 24.0f;
+    if (server.hasArg("gain")) {
+      float userGain = server.arg("gain").toFloat();
+      if (userGain >= 1.0f && userGain <= 60.0f) targetGain = userGain;
+    } else {
+      if (maxAmp < 200.0f) targetGain = 36.0f;     // Extreme whisper boost
+      else if (maxAmp < 500.0f) targetGain = 28.0f; // Soft speech boost
+      else if (maxAmp > 3000.0f) targetGain = 8.0f; // Loud speech limiter
+    }
+
+    // 3. DSP High-Pass IIR Filter: Cut frequencies below ~160Hz
+    // Kills fan motor hum, wind noise, and DC bias without muffling speech
+    static float x_prev = 0.0f;
+    static float y_prev = 0.0f;
+    const float alpha = 0.94f; // 150-180Hz cutoff
+
+    for (size_t i = 0; i < samples; i++) {
+      float x = (float)pcmBuffer[i];
+      float y = x - x_prev + alpha * y_prev;
+      x_prev = x;
+      y_prev = y;
+
+      float amplified = y * targetGain;
+      // Soft saturation clamp
+      if (amplified > 32767.0f) amplified = 32767.0f;
+      else if (amplified < -32768.0f) amplified = -32768.0f;
+
+      pcmBuffer[i] = (int16_t)amplified;
       int16_t absVal = abs(pcmBuffer[i]);
       if (absVal > peakVal) peakVal = absVal;
     }
