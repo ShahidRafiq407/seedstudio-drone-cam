@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>XIAO ESP32-S3 Remote Cloud Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title-box">
+        <h1>🚁 XIAO Drone & Remote Cam</h1>
+      </div>
+      <div id="statusBadge" class="badge">Standby</div>
+    </header>
+
+    <!-- Connection Config Bar -->
+    <div class="config-bar">
+      <input type="text" id="espUrl" placeholder="ESP32 IP or Cloudflare/Ngrok URL (e.g. http://192.168.1.50)">
+      <button class="save-btn" onclick="saveEspUrl()">Connect</button>
+    </div>
+
+    <!-- Video Feed Card -->
+    <div class="stream-card">
+      <img id="videoFeed" alt="Camera Feed">
+      <div id="noFeedMsg" class="no-feed-msg">
+        <span style="font-size: 2.5rem;">📷</span>
+        <span>Camera in Standby</span>
+        <span style="font-size: 0.75rem; color: #5a6578;">Click 'Camera ON' or 'Turbo Mode' to start live feed</span>
+      </div>
+    </div>
+
+    <!-- Audio Visualizer Card -->
+    <div class="audio-card">
+      <div class="audio-header">
+        <span>🎙️ PDM Microphone (16kHz)</span>
+        <span id="audioStatus">Muted</span>
+      </div>
+      <canvas id="audioCanvas"></canvas>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-grid">
+      <button id="btnCam" class="btn" onclick="toggleMode('camera')">
+        <span>📷</span>
+        Camera
+      </button>
+      <button id="btnMic" class="btn" onclick="toggleMode('mic')">
+        <span>🎙️</span>
+        Mic
+      </button>
+      <button id="btnTurbo" class="btn" onclick="toggleMode('turbo')">
+        <span>⚡</span>
+        Turbo Mode
+      </button>
+      <button id="btnRec" class="btn rec-btn" onclick="toggleRecord()">
+        <span>⏺️</span>
+        SD Record
+      </button>
+      <button class="btn" onclick="takeSnapshot()">
+        <span>📸</span>
+        Snapshot
+      </button>
+      <button id="btnStandby" class="btn sleep-btn" onclick="toggleMode('standby')">
+        <span>🍃</span>
+        Light Sleep
+      </button>
+      <button class="btn sleep-btn" onclick="triggerDeepSleep()">
+        <span>🌙</span>
+        Deep Sleep
+      </button>
+    </div>
+
+    <!-- Telemetry -->
+    <div class="telemetry">
+      <div class="tele-item">
+        <div class="tele-label">Wi-Fi RSSI</div>
+        <div id="teleWifi" class="tele-val">-- dBm</div>
+      </div>
+      <div class="tele-item">
+        <div class="tele-label">Mode</div>
+        <div id="teleMode" class="tele-val">Standby</div>
+      </div>
+      <div class="tele-item">
+        <div class="tele-label">SD Card</div>
+        <div id="teleSD" class="tele-val">--</div>
+      </div>
+      <div class="tele-item">
+        <div class="tele-label">Free PSRAM</div>
+        <div id="teleRam" class="tele-val">-- KB</div>
+      </div>
+    </div>
+
+    <!-- MicroSD Explorer -->
+    <div class="sd-card-panel">
+      <h3>
+        <span>📁 MicroSD Storage Recordings</span>
+        <button class="refresh-btn" onclick="loadFiles()">Refresh</button>
+      </h3>
+      <div id="fileList" class="file-list">
+        <div style="text-align:center; color:var(--text-muted); padding:10px;">Connect ESP32 to list files</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
