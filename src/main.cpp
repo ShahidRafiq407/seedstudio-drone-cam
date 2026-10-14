@@ -118,7 +118,7 @@ bool initCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
   config.frame_size   = FRAMESIZE_HVGA;   // 480x320 for ultra-smooth 25+ FPS without stutter
-  config.jpeg_quality = 14;               // 14 = lightweight (~11KB per frame)
+  config.jpeg_quality = 12;               // 12 = crystal clear HD quality
   config.fb_count     = 2;
   config.grab_mode    = CAMERA_GRAB_LATEST;
   config.fb_location  = CAMERA_FB_IN_PSRAM;
@@ -128,7 +128,31 @@ bool initCamera() {
     Serial.printf("[CAM] Camera init failed with error 0x%x\n", err);
     return false;
   }
-  Serial.println("[CAM] Camera Initialized Successfully");
+
+  // Configure OV2640 Hardware DSP Pipeline for Vivid, Crystal-Clear Images
+  sensor_t *s = esp_camera_sensor_get();
+  if (s) {
+    s->set_brightness(s, 1);                 // -2 to 2 (slight lift for indoor light)
+    s->set_contrast(s, 1);                   // -2 to 2 (sharp contrast)
+    s->set_saturation(s, 0);                 // -2 to 2 (natural true colors)
+    s->set_special_effect(s, 0);             // 0 = Normal
+    s->set_whitebal(s, 1);                   // 1 = Auto White Balance (kills purple tint)
+    s->set_awb_gain(s, 1);                   // 1 = AWB Gain
+    s->set_wb_mode(s, 0);                    // 0 = Auto
+    s->set_exposure_ctrl(s, 1);              // 1 = Auto Exposure
+    s->set_aec2(s, 1);                       // 1 = DSP AEC2
+    s->set_ae_level(s, 0);                   // -2 to 2
+    s->set_aec_value(s, 300);                // 0 to 1200
+    s->set_gain_ctrl(s, 1);                  // 1 = Auto Gain
+    s->set_gainceiling(s, (gainceiling_t)2); // GAINCEILING_4X
+    s->set_bpc(s, 1);                        // Black pixel correction (kills dead pixel noise)
+    s->set_wpc(s, 1);                        // White pixel correction (kills hot white dots)
+    s->set_raw_gma(s, 1);                    // Gamma curve correction (rich highlights)
+    s->set_lenc(s, 1);                       // Lens distortion & corner vignetting correction
+    s->set_dcw(s, 1);                        // Downsize EN
+  }
+
+  Serial.println("[CAM] Camera Initialized Successfully with DSP Quality Enhancements");
   return true;
 }
 
@@ -562,14 +586,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         </button>
       </div>
 
-      <div class="audio-rec-bar" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-        <button id="btnPhoneVideoRec" class="phone-rec-btn" style="border-color: var(--primary); background: rgba(79, 172, 254, 0.15);" onclick="togglePhoneVideoRecording()">
-          <span>🎥</span>
-          <span id="phoneVideoRecText">Record Video to Phone</span>
-        </button>
-        <button id="btnPhoneRec" class="phone-rec-btn" onclick="togglePhoneAudioRecording()">
-          <span>🔴</span>
-          <span id="phoneRecText">Record Audio to Phone</span>
+      <div class="audio-rec-bar" style="display: flex; justify-content: center;">
+        <button id="btnSmartRec" class="phone-rec-btn" style="width: 100%; justify-content: center; font-size: 0.88rem; padding: 12px; gap: 10px;" onclick="handleSmartRecordToggle()">
+          <span id="smartRecIcon">🎥</span>
+          <span id="smartRecText">Record Video to Phone</span>
         </button>
       </div>
     </div>
@@ -664,14 +684,27 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     let audioCtx = null;
     let gainNode = null;
     let filterNode = null;
+    let audioDestNode = null;
     let noiseFilterEnabled = true;
     let userVolume = 2.5;
-    let audioInterval = null;
 
-    let isPhoneRecording = false;
+    let isSmartRecording = false;
+    let smartRecType = 'none'; // 'video', 'audio', 'turbo'
+    let mediaRecorder = null;
+    let recordedMediaChunks = [];
     let phoneRecordedChunks = [];
-    let phoneRecStartTime = 0;
-    let phoneRecTimer = null;
+    let smartRecStartTime = 0;
+    let smartRecTimer = null;
+
+    let isVideoStreaming = false;
+    let frameInFlight = false;
+    let frameTimer = null;
+    let recCanvas = null;
+
+    let isAudioActive = false;
+    let audioFetchInFlight = false;
+    let audioTimer = null;
+    let nextPlayTime = 0;
 
     const canvas = document.getElementById('audioCanvas');
     const ctx = canvas.getContext('2d');
@@ -703,7 +736,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
     function initAudioPipeline() {
       if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
       }
       if (!gainNode) {
         gainNode = audioCtx.createGain();
@@ -712,11 +745,15 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       if (!filterNode) {
         filterNode = audioCtx.createBiquadFilter();
         filterNode.type = 'highpass';
-        filterNode.frequency.value = noiseFilterEnabled ? 180 : 20;
-        filterNode.Q.value = 0.7;
+        filterNode.frequency.value = noiseFilterEnabled ? 220 : 20;
+        filterNode.Q.value = 0.8;
 
         filterNode.connect(gainNode);
         gainNode.connect(audioCtx.destination);
+      }
+      if (!audioDestNode && audioCtx.createMediaStreamDestination) {
+        audioDestNode = audioCtx.createMediaStreamDestination();
+        gainNode.connect(audioDestNode);
       }
     }
 
@@ -731,7 +768,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       const btn = document.getElementById('btnNoiseFilter');
       btn.classList.toggle('active', noiseFilterEnabled);
       btn.innerText = noiseFilterEnabled ? '🍃 Fan Filter: ON' : '🍃 Fan Filter: OFF';
-      if (filterNode) filterNode.frequency.value = noiseFilterEnabled ? 180 : 20;
+      if (filterNode) filterNode.frequency.value = noiseFilterEnabled ? 220 : 20;
     }
 
     function resumeAudio() {
@@ -747,14 +784,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       else if (res === 'vga') document.getElementById('resVga').classList.add('active');
       else document.getElementById('resHvga').classList.add('active');
 
-      fetch('/set_resolution?res=' + res)
-        .then(r => r.json())
-        .then(d => {
-          if (currentMode === 'camera' || currentMode === 'turbo') {
-            const feed = document.getElementById('videoFeed');
-            feed.src = '/stream?t=' + Date.now();
-          }
-        }).catch(e => console.error(e));
+      fetch('/set_resolution?res=' + res).catch(e => console.error(e));
     }
 
     async function handleModeClick(requestedMode) {
@@ -766,15 +796,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         targetMode = 'standby';
       }
 
-      const videoFeed = document.getElementById('videoFeed');
-      if (currentMode === 'camera' || currentMode === 'turbo') {
-        videoFeed.src = '';
-        videoFeed.style.display = 'none';
-        document.getElementById('noFeedMsg').style.display = 'flex';
-      }
+      stopVideoStream();
       stopAudioStream();
-
-      await new Promise(r => setTimeout(r, 60));
 
       try {
         const res = await fetch('/set_mode?mode=' + targetMode);
@@ -813,7 +836,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     function confirmDeepSleep(minutes) {
       closeDeepSleepModal();
       if (confirm(`ESP32 will sleep for ${minutes} minutes to save battery.\nWiFi will be OFF.\nContinue?`)) {
-        document.getElementById('videoFeed').src = '';
+        stopVideoStream();
         stopAudioStream();
         fetch('/deep_sleep?minutes=' + minutes);
         alert(`ESP32 is now in Deep Sleep for ${minutes} minutes.`);
@@ -868,17 +891,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         statusBadge.className = "badge";
       }
 
-      const videoFeed = document.getElementById('videoFeed');
-      const noFeedMsg = document.getElementById('noFeedMsg');
       if (currentMode === 'camera' || currentMode === 'turbo') {
-        const streamUrl = '/stream?t=' + Date.now();
-        if (videoFeed.src !== streamUrl) videoFeed.src = streamUrl;
-        videoFeed.style.display = 'block';
-        noFeedMsg.style.display = 'none';
+        startVideoStream();
       } else {
-        videoFeed.src = '';
-        videoFeed.style.display = 'none';
-        noFeedMsg.style.display = 'flex';
+        stopVideoStream();
       }
 
       if (currentMode === 'mic' || currentMode === 'turbo') {
@@ -886,44 +902,143 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       } else {
         stopAudioStream();
       }
+
+      updateSmartRecButtonState();
     }
 
+    // --- NON-BLOCKING RAPID VIDEO STREAMING ---
+    function startVideoStream() {
+      if (isVideoStreaming) return;
+      isVideoStreaming = true;
+      frameInFlight = false;
+      fetchNextFrame();
+    }
+
+    function stopVideoStream() {
+      isVideoStreaming = false;
+      frameInFlight = false;
+      if (frameTimer) {
+        clearTimeout(frameTimer);
+        frameTimer = null;
+      }
+      const feed = document.getElementById('videoFeed');
+      if (feed) {
+        feed.src = '';
+        feed.style.display = 'none';
+      }
+      const noFeed = document.getElementById('noFeedMsg');
+      if (noFeed) noFeed.style.display = 'flex';
+    }
+
+    function fetchNextFrame() {
+      if (!isVideoStreaming) return;
+      if (currentMode !== 'camera' && currentMode !== 'turbo') {
+        stopVideoStream();
+        return;
+      }
+      if (frameInFlight) return;
+
+      frameInFlight = true;
+      const img = new Image();
+      img.onload = () => {
+        frameInFlight = false;
+        if (!isVideoStreaming) return;
+
+        const feed = document.getElementById('videoFeed');
+        const noFeed = document.getElementById('noFeedMsg');
+        if (feed && noFeed) {
+          feed.src = img.src;
+          feed.style.display = 'block';
+          noFeed.style.display = 'none';
+        }
+
+        if (!recCanvas) {
+          recCanvas = document.createElement('canvas');
+          recCanvas.width = 480;
+          recCanvas.height = 320;
+        }
+        const rCtx = recCanvas.getContext('2d');
+        rCtx.drawImage(img, 0, 0, recCanvas.width, recCanvas.height);
+
+        if (isVideoStreaming) {
+          frameTimer = setTimeout(fetchNextFrame, 20);
+        }
+      };
+      img.onerror = () => {
+        frameInFlight = false;
+        if (isVideoStreaming) {
+          frameTimer = setTimeout(fetchNextFrame, 120);
+        }
+      };
+      img.src = '/capture?t=' + Date.now();
+    }
+
+    // --- CONTINUOUS REAL-TIME AUDIO STREAMING ---
     function startAudioStream() {
-      if (audioInterval) return;
+      if (isAudioActive) return;
+      isAudioActive = true;
+      audioFetchInFlight = false;
+      nextPlayTime = 0;
       resumeAudio();
       document.getElementById('audioStatus').innerText = "Active (Listening)";
+      fetchAudioLoop();
+    }
 
-      let isFetching = false;
-      audioInterval = setInterval(() => {
-        if (isFetching) return;
-        isFetching = true;
+    function stopAudioStream() {
+      isAudioActive = false;
+      audioFetchInFlight = false;
+      if (audioTimer) {
+        clearTimeout(audioTimer);
+        audioTimer = null;
+      }
+      document.getElementById('audioStatus').innerText = "Muted";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
 
-        const gainParam = Math.round(userVolume * 10);
-        fetch('/audio_chunk?gain=' + gainParam + '&t=' + Date.now())
-          .then(res => {
-            const peak = res.headers.get('X-Peak-Volume');
-            if (peak) {
-              const peakNum = parseInt(peak, 10);
-              if (peakNum > 20000) document.getElementById('audioStatus').innerText = `Loud (${peak})`;
-              else if (peakNum > 1000) document.getElementById('audioStatus').innerText = `Speech (${peak})`;
-              else document.getElementById('audioStatus').innerText = `Quiet (${peak})`;
-            }
-            return res.arrayBuffer();
-          })
-          .then(buf => {
-            isFetching = false;
-            if (!buf || buf.byteLength <= 44) return;
+    function fetchAudioLoop() {
+      if (!isAudioActive) return;
+      if (currentMode !== 'mic' && currentMode !== 'turbo') {
+        stopAudioStream();
+        return;
+      }
+      if (audioFetchInFlight) return;
+
+      audioFetchInFlight = true;
+      const gainParam = Math.round(userVolume * 10);
+      const filterParam = noiseFilterEnabled ? "1" : "0";
+
+      fetch('/audio_chunk?gain=' + gainParam + '&filter=' + filterParam + '&t=' + Date.now())
+        .then(res => {
+          const peak = res.headers.get('X-Peak-Volume');
+          if (peak) {
+            const peakNum = parseInt(peak, 10);
+            if (peakNum > 20000) document.getElementById('audioStatus').innerText = `Loud (${peak})`;
+            else if (peakNum > 1000) document.getElementById('audioStatus').innerText = `Speech (${peak})`;
+            else document.getElementById('audioStatus').innerText = `Listening (${peak})`;
+          }
+          return res.arrayBuffer();
+        })
+        .then(buf => {
+          audioFetchInFlight = false;
+          if (!isAudioActive) return;
+
+          if (buf && buf.byteLength > 44) {
             resumeAudio();
 
-            if (isPhoneRecording) {
+            if (isSmartRecording && (smartRecType === 'audio' || smartRecType === 'turbo')) {
               phoneRecordedChunks.push(new Int16Array(buf.slice(44)));
             }
 
             audioCtx.decodeAudioData(buf.slice(0), (audioBuffer) => {
+              if (!isAudioActive) return;
               const src = audioCtx.createBufferSource();
               src.buffer = audioBuffer;
               src.connect(filterNode);
-              src.start();
+
+              const now = audioCtx.currentTime;
+              if (nextPlayTime < now) nextPlayTime = now;
+              src.start(nextPlayTime);
+              nextPlayTime += audioBuffer.duration;
 
               const pcm = audioBuffer.getChannelData(0);
               const sampleWave = [];
@@ -933,143 +1048,185 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
               }
               drawWave(sampleWave);
             }, (err) => {});
-          }).catch(e => { isFetching = false; });
-      }, 450);
+          }
+
+          if (isAudioActive) {
+            audioTimer = setTimeout(fetchAudioLoop, 25);
+          }
+        })
+        .catch(err => {
+          audioFetchInFlight = false;
+          if (isAudioActive) {
+            audioTimer = setTimeout(fetchAudioLoop, 150);
+          }
+        });
     }
 
-    function stopAudioStream() {
-      if (audioInterval) {
-        clearInterval(audioInterval);
-        audioInterval = null;
+    // --- DYNAMIC SMART RECORD BUTTON LOGIC ---
+    function updateSmartRecButtonState() {
+      const btn = document.getElementById('btnSmartRec');
+      const icon = document.getElementById('smartRecIcon');
+      const txt = document.getElementById('smartRecText');
+      if (!btn || !icon || !txt) return;
+
+      if (isSmartRecording) return;
+
+      btn.style.opacity = '1';
+      btn.disabled = false;
+      btn.classList.remove('recording');
+
+      if (currentMode === 'camera') {
+        icon.innerText = '🎥';
+        txt.innerText = 'Record Video to Phone';
+        btn.style.display = 'flex';
+      } else if (currentMode === 'mic') {
+        icon.innerText = '🎙️';
+        txt.innerText = 'Record Audio to Phone';
+        btn.style.display = 'flex';
+      } else if (currentMode === 'turbo') {
+        icon.innerText = '⚡';
+        txt.innerText = 'Record Video + Audio to Phone';
+        btn.style.display = 'flex';
+      } else {
+        icon.innerText = '⏸️';
+        txt.innerText = 'Select Camera / Mic / Turbo to Record';
+        btn.style.opacity = '0.5';
       }
-      document.getElementById('audioStatus').innerText = "Muted";
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
-    // Phone Video Recording (MediaRecorder + Canvas Stream)
-    let isPhoneVideoRecording = false;
-    let mediaRecorder = null;
-    let recordedVideoChunks = [];
-    let videoRecTimer = null;
-    let videoRecStartTime = 0;
-    let recCanvas = null;
-    let recDrawInterval = null;
+    function handleSmartRecordToggle() {
+      if (isSmartRecording) {
+        stopSmartRecording();
+      } else {
+        startSmartRecording();
+      }
+    }
 
-    function togglePhoneVideoRecording() {
-      if (currentMode !== 'camera' && currentMode !== 'turbo') {
-        alert("Please turn on Camera or Turbo Mode first before recording video!");
+    function startSmartRecording() {
+      if (currentMode === 'standby') {
+        alert("Please select Camera, Mic, or Turbo Mode before recording!");
         return;
       }
 
-      const btn = document.getElementById('btnPhoneVideoRec');
-      const txt = document.getElementById('phoneVideoRecText');
-      const videoFeed = document.getElementById('videoFeed');
+      const btn = document.getElementById('btnSmartRec');
+      const icon = document.getElementById('smartRecIcon');
+      const txt = document.getElementById('smartRecText');
 
-      if (!isPhoneVideoRecording) {
-        isPhoneVideoRecording = true;
-        recordedVideoChunks = [];
-        videoRecStartTime = Date.now();
-        btn.classList.add('recording');
+      isSmartRecording = true;
+      smartRecStartTime = Date.now();
+      btn.classList.add('recording');
 
+      smartRecTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - smartRecStartTime) / 1000);
+        const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const s = String(elapsed % 60).padStart(2, '0');
+        icon.innerText = '⏹️';
+        if (smartRecType === 'video') txt.innerText = `Stop Video (${m}:${s})`;
+        else if (smartRecType === 'audio') txt.innerText = `Stop Audio (${m}:${s})`;
+        else txt.innerText = `Stop Video+Audio (${m}:${s})`;
+      }, 1000);
+
+      if (currentMode === 'camera') {
+        smartRecType = 'video';
+        recordedMediaChunks = [];
         if (!recCanvas) {
           recCanvas = document.createElement('canvas');
           recCanvas.width = 480;
           recCanvas.height = 320;
         }
-        const recCtx = recCanvas.getContext('2d');
-
-        recDrawInterval = setInterval(() => {
-          if (videoFeed && videoFeed.naturalWidth) {
-            recCtx.drawImage(videoFeed, 0, 0, recCanvas.width, recCanvas.height);
-          }
-        }, 50);
-
-        const stream = recCanvas.captureStream(20);
-
+        const stream = recCanvas.captureStream(25);
+        let mime = 'video/webm;codecs=vp8';
+        if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
         try {
-          mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+          mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
         } catch(e) {
-          try {
-            mediaRecorder = new MediaRecorder(stream);
-          } catch(err2) {
-            alert("Video recording not supported on this browser: " + err2.message);
-            isPhoneVideoRecording = false;
-            clearInterval(recDrawInterval);
-            btn.classList.remove('recording');
-            return;
-          }
+          mediaRecorder = new MediaRecorder(stream);
         }
-
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) {
-            recordedVideoChunks.push(event.data);
-          }
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) recordedMediaChunks.push(e.data);
         };
-
-        mediaRecorder.onstop = () => {
-          clearInterval(recDrawInterval);
-          if (recordedVideoChunks.length === 0) return;
-          const blob = new Blob(recordedVideoChunks, { type: 'video/webm' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          const now = new Date();
-          const timestamp = now.toISOString().replace(/[-:T]/g, '_').slice(0, 15);
-          a.href = url;
-          a.download = `Drone_Video_${timestamp}.webm`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        };
-
         mediaRecorder.start(500);
-
-        videoRecTimer = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - videoRecStartTime) / 1000);
-          const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
-          const s = String(elapsed % 60).padStart(2, '0');
-          txt.innerText = `⏹️ Stop Video (${m}:${s})`;
-        }, 1000);
-      } else {
-        isPhoneVideoRecording = false;
-        clearInterval(videoRecTimer);
-        btn.classList.remove('recording');
-        txt.innerText = "Record Video to Phone";
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-      }
-    }
-
-    function togglePhoneAudioRecording() {
-      resumeAudio();
-      const btn = document.getElementById('btnPhoneRec');
-      const txt = document.getElementById('phoneRecText');
-
-      if (!isPhoneRecording) {
-        isPhoneRecording = true;
+      } else if (currentMode === 'mic') {
+        smartRecType = 'audio';
         phoneRecordedChunks = [];
-        phoneRecStartTime = Date.now();
-        btn.classList.add('recording');
-        if (currentMode !== 'mic' && currentMode !== 'turbo') handleModeClick('mic');
+        resumeAudio();
+      } else if (currentMode === 'turbo') {
+        smartRecType = 'turbo';
+        recordedMediaChunks = [];
+        phoneRecordedChunks = [];
+        resumeAudio();
+        if (!recCanvas) {
+          recCanvas = document.createElement('canvas');
+          recCanvas.width = 480;
+          recCanvas.height = 320;
+        }
+        const videoTracks = recCanvas.captureStream(25).getVideoTracks();
+        const audioTracks = (audioDestNode && audioDestNode.stream) ? audioDestNode.stream.getAudioTracks() : [];
+        const combinedStream = new MediaStream([...videoTracks, ...audioTracks]);
 
-        phoneRecTimer = setInterval(() => {
-          const elapsed = Math.floor((Date.now() - phoneRecStartTime) / 1000);
-          const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
-          const s = String(elapsed % 60).padStart(2, '0');
-          txt.innerText = `⏹️ Stop & Save (${m}:${s})`;
-        }, 1000);
-      } else {
-        isPhoneRecording = false;
-        clearInterval(phoneRecTimer);
-        btn.classList.remove('recording');
-        txt.innerText = "Record Audio to Phone";
-        if (phoneRecordedChunks.length === 0) { alert("No audio data!"); return; }
-        savePhoneWavFile(phoneRecordedChunks);
+        let mime = 'video/webm;codecs=vp8,opus';
+        if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+        try {
+          mediaRecorder = new MediaRecorder(combinedStream, mime ? { mimeType: mime } : undefined);
+        } catch(e) {
+          mediaRecorder = new MediaRecorder(combinedStream);
+        }
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) recordedMediaChunks.push(e.data);
+        };
+        mediaRecorder.start(500);
       }
     }
 
-    function savePhoneWavFile(chunks) {
+    function stopSmartRecording() {
+      isSmartRecording = false;
+      if (smartRecTimer) {
+        clearInterval(smartRecTimer);
+        smartRecTimer = null;
+      }
+      const btn = document.getElementById('btnSmartRec');
+      btn.classList.remove('recording');
+
+      const now = new Date();
+      const ts = now.toISOString().replace(/[-:T]/g, '_').slice(0, 15);
+
+      if (smartRecType === 'video' || smartRecType === 'turbo') {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.onstop = () => {
+            if (recordedMediaChunks.length > 0) {
+              const blob = new Blob(recordedMediaChunks, { type: 'video/webm' });
+              downloadBlob(blob, smartRecType === 'turbo' ? `Drone_Turbo_${ts}.webm` : `Drone_Video_${ts}.webm`);
+            } else {
+              alert("No video recorded!");
+            }
+            updateSmartRecButtonState();
+          };
+          mediaRecorder.stop();
+        } else {
+          updateSmartRecButtonState();
+        }
+      } else if (smartRecType === 'audio') {
+        if (phoneRecordedChunks.length === 0) {
+          alert("No audio data received from microphone!");
+        } else {
+          savePhoneWavFile(phoneRecordedChunks, `Drone_Audio_${ts}.wav`);
+        }
+        updateSmartRecButtonState();
+      }
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    function savePhoneWavFile(chunks, filename) {
       let totalSamples = 0;
       for (let c of chunks) totalSamples += c.length;
 
@@ -1099,16 +1256,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       }
 
       const blob = new Blob([buffer], { type: 'audio/wav' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      const now = new Date();
-      const ts = now.toISOString().replace(/[-:T]/g, '_').slice(0, 15);
-      a.href = url;
-      a.download = `Audio_Voice_${ts}.wav`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, filename || `Drone_Audio_${Date.now()}.wav`);
     }
 
     function writeString(view, offset, string) {
@@ -1356,7 +1504,7 @@ void handleStream() {
   client.stop();
 }
 
-// Single Photo Capture
+// Single Photo / Rapid Video Frame Capture
 void handleCapture() {
   addCorsHeaders();
   if (!cameraInitialized) {
@@ -1368,18 +1516,21 @@ void handleCapture() {
     server.send(500, "text/plain", "Failed to capture frame");
     return;
   }
-  server.sendHeader("Content-Type", "image/jpeg");
-  server.sendHeader("Content-Length", String(fb->len));
   WiFiClient client = server.client();
-  client.print("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: " + String(fb->len) + "\r\nAccess-Control-Allow-Origin: *\r\n\r\n");
+  client.setNoDelay(true);
+  client.print("HTTP/1.1 200 OK\r\n"
+               "Content-Type: image/jpeg\r\n"
+               "Content-Length: " + String(fb->len) + "\r\n"
+               "Access-Control-Allow-Origin: *\r\n"
+               "Cache-Control: no-cache, no-store, must-revalidate\r\n\r\n");
   client.write(fb->buf, fb->len);
   esp_camera_fb_return(fb);
 }
 
-// Audio Chunk Handler with DSP Fan Filter & Whisper AGC Boost
+// Audio Chunk Handler: 16kHz Crystal Clear Voice with 220Hz Fan Hum Filter & Soft Limiter
 void handleAudioChunk() {
   addCorsHeaders();
-  const size_t sampleCount = 8000; // 0.5 second at 16000Hz
+  const size_t sampleCount = 3200; // 0.20 second chunk for ultra-low latency non-blocking streaming
   const size_t pcmBytes = sampleCount * sizeof(int16_t);
   
   // Allocate in internal SRAM for I2S DMA
@@ -1390,46 +1541,48 @@ void handleAudioChunk() {
   }
 
   size_t bytesRead = 0;
-  esp_err_t r = i2s_read(I2S_MIC_CHANNEL, (void*)pcmBuffer, pcmBytes, &bytesRead, pdMS_TO_TICKS(500));
+  esp_err_t r = i2s_read(I2S_MIC_CHANNEL, (void*)pcmBuffer, pcmBytes, &bytesRead, pdMS_TO_TICKS(220));
 
   int16_t peakVal = 0;
   if (r == ESP_OK && bytesRead > 0) {
     size_t samples = bytesRead / sizeof(int16_t);
 
-    // 1. First pass: Measure ambient level to auto-detect whispers
-    float maxAmp = 0.0f;
-    for (size_t i = 0; i < samples; i++) {
-      float a = fabsf((float)pcmBuffer[i]);
-      if (a > maxAmp) maxAmp = a;
-    }
-
-    // 2. Adaptive Gain Control (AGC)
-    // If whisper detected (maxAmp < 250), boost up to 36x!
-    // If user provided gain in query parameter (?gain=X), use that.
-    float targetGain = 24.0f;
+    // Natural clean voice gain (3.0x to 4.5x)
+    float targetGain = 3.2f;
     if (server.hasArg("gain")) {
       float userGain = server.arg("gain").toFloat();
-      if (userGain >= 1.0f && userGain <= 60.0f) targetGain = userGain;
-    } else {
-      if (maxAmp < 200.0f) targetGain = 36.0f;     // Extreme whisper boost
-      else if (maxAmp < 500.0f) targetGain = 28.0f; // Soft speech boost
-      else if (maxAmp > 3000.0f) targetGain = 8.0f; // Loud speech limiter
+      if (userGain >= 5.0f && userGain <= 60.0f) {
+        targetGain = userGain / 8.0f; // maps 10-50 to 1.25x-6.2x clean gain
+      }
     }
 
-    // 3. DSP High-Pass IIR Filter: Cut frequencies below ~160Hz
-    // Kills fan motor hum, wind noise, and DC bias without muffling speech
+    bool applyFilter = true;
+    if (server.hasArg("filter")) {
+      applyFilter = (server.arg("filter") == "1");
+    }
+
+    // 220Hz DSP High-Pass IIR Filter: Eliminates drone motor drone & fan rumble
     static float x_prev = 0.0f;
     static float y_prev = 0.0f;
-    const float alpha = 0.94f; // 150-180Hz cutoff
+    const float alpha = 0.915f; // ~220Hz cutoff at 16000Hz sampling rate
 
     for (size_t i = 0; i < samples; i++) {
       float x = (float)pcmBuffer[i];
-      float y = x - x_prev + alpha * y_prev;
-      x_prev = x;
-      y_prev = y;
+      float y;
+      if (applyFilter) {
+        y = x - x_prev + alpha * y_prev;
+        x_prev = x;
+        y_prev = y;
+      } else {
+        y = x;
+      }
 
       float amplified = y * targetGain;
-      // Soft saturation clamp
+
+      // Soft limiting curve: avoids harsh 32767 digital clipping and crackle
+      if (amplified > 26000.0f) amplified = 26000.0f + (amplified - 26000.0f) * 0.15f;
+      else if (amplified < -26000.0f) amplified = -26000.0f + (amplified + 26000.0f) * 0.15f;
+
       if (amplified > 32767.0f) amplified = 32767.0f;
       else if (amplified < -32768.0f) amplified = -32768.0f;
 
@@ -1444,6 +1597,7 @@ void handleAudioChunk() {
   header.chunkSize = bytesRead + sizeof(WavHeader) - 8;
 
   WiFiClient client = server.client();
+  client.setNoDelay(true);
   client.print("HTTP/1.1 200 OK\r\n"
                "Content-Type: audio/wav\r\n"
                "Content-Length: " + String(sizeof(WavHeader) + bytesRead) + "\r\n"
