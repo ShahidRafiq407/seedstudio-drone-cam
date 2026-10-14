@@ -70,6 +70,7 @@ bool cameraInitialized = false;
 bool micInitialized = false;
 unsigned long lastRecordTime = 0;
 uint32_t recordFileIndex = 1;
+bool nightModeActive = false;
 
 WebServer server(80);
 
@@ -141,10 +142,10 @@ bool initCamera() {
     s->set_wb_mode(s, 0);                    // 0 = Auto
     s->set_exposure_ctrl(s, 1);              // 1 = Auto Exposure
     s->set_aec2(s, 1);                       // 1 = DSP AEC2
-    s->set_ae_level(s, 0);                   // -2 to 2
-    s->set_aec_value(s, 300);                // 0 to 1200
+    s->set_ae_level(s, 1);                   // +1 target exposure boost for dark rooms
+    s->set_aec_value(s, 450);                // 0 to 1200
     s->set_gain_ctrl(s, 1);                  // 1 = Auto Gain
-    s->set_gainceiling(s, (gainceiling_t)2); // GAINCEILING_4X
+    s->set_gainceiling(s, (gainceiling_t)4); // GAINCEILING_16X (significantly boosts low-light / night sensitivity)
     s->set_bpc(s, 1);                        // Black pixel correction (kills dead pixel noise)
     s->set_wpc(s, 1);                        // White pixel correction (kills hot white dots)
     s->set_raw_gma(s, 1);                    // Gamma curve correction (rich highlights)
@@ -552,14 +553,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <div class="title-box">
         <h1>🚁 XIAO Drone Surveillance</h1>
       </div>
-      <div id="statusBadge" class="badge">Standby</div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <div id="connBadge" class="badge" style="background: rgba(10, 255, 150, 0.15); color: #0aff96; border: 1px solid #0aff96;">🟢 ONLINE</div>
+        <div id="statusBadge" class="badge">Standby</div>
+      </div>
     </header>
 
     <div class="stream-card">
-      <div style="position: absolute; top: 10px; left: 10px; z-index: 10; display: flex; gap: 6px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.15);">
+      <div style="position: absolute; top: 10px; left: 10px; z-index: 10; display: flex; gap: 6px; background: rgba(0,0,0,0.65); padding: 4px 8px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.15); flex-wrap: wrap;">
         <button id="resQvga" class="chip-btn" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('qvga')">⚡ 320p</button>
-        <button id="resHvga" class="chip-btn active" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('hvga')">🚀 480p Smooth</button>
-        <button id="resVga" class="chip-btn" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('vga')">📷 640p HD</button>
+        <button id="resHvga" class="chip-btn active" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('hvga')">🚀 480p</button>
+        <button id="resVga" class="chip-btn" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('vga')">📷 640p</button>
+        <button id="resHd" class="chip-btn" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('hd')">🌟 720p HD</button>
+        <button id="btnNightMode" class="chip-btn" style="padding: 2px 8px; font-size: 0.72rem; background: rgba(255,209,102,0.15); border-color: #ffd166; color: #ffd166;" onclick="toggleNightMode()">🌙 Night: OFF</button>
       </div>
       <img id="videoFeed" alt="Camera Feed">
       <div id="noFeedMsg" class="no-feed-msg">
@@ -776,12 +782,28 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     }
 
+    let isNightMode = false;
+    function toggleNightMode() {
+      isNightMode = !isNightMode;
+      const btn = document.getElementById('btnNightMode');
+      if (btn) {
+        btn.innerText = isNightMode ? "🌙 Night: ON" : "🌙 Night: OFF";
+        btn.style.background = isNightMode ? "#ffd166" : "rgba(255,209,102,0.15)";
+        btn.style.color = isNightMode ? "#000" : "#ffd166";
+      }
+      fetch('/set_night_mode?enabled=' + (isNightMode ? "1" : "0")).catch(e => console.error(e));
+    }
+
     function changeResolution(res) {
       document.getElementById('resQvga').classList.remove('active');
       document.getElementById('resHvga').classList.remove('active');
       document.getElementById('resVga').classList.remove('active');
+      const hdBtn = document.getElementById('resHd');
+      if (hdBtn) hdBtn.classList.remove('active');
+
       if (res === 'qvga') document.getElementById('resQvga').classList.add('active');
       else if (res === 'vga') document.getElementById('resVga').classList.add('active');
+      else if (res === 'hd' && hdBtn) hdBtn.classList.add('active');
       else document.getElementById('resHvga').classList.add('active');
 
       fetch('/set_resolution?res=' + res).catch(e => console.error(e));
@@ -849,7 +871,17 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       isRecording = status.recording;
       sdMounted = !!status.sd;
 
-      document.getElementById('teleWifi').innerText = (status.wifi_rssi || '--') + " dBm";
+      const wifiEl = document.getElementById('teleWifi');
+      if (wifiEl) {
+        const rssi = status.wifi_rssi;
+        let quality = "Weak (Attach Antenna!)";
+        let color = "var(--red)";
+        if (rssi > -60) { quality = "Excellent"; color = "var(--green)"; }
+        else if (rssi > -70) { quality = "Good"; color = "#ffd166"; }
+        else if (rssi > -80) { quality = "Fair"; color = "#ff9f43"; }
+        wifiEl.innerText = `${rssi} dBm (${quality})`;
+        wifiEl.style.color = color;
+      }
       document.getElementById('teleMode').innerText = status.mode.toUpperCase();
       document.getElementById('teleRam').innerText = Math.round((status.free_psram || 0) / 1024) + " KB";
 
@@ -954,8 +986,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
         if (!recCanvas) {
           recCanvas = document.createElement('canvas');
-          recCanvas.width = 480;
-          recCanvas.height = 320;
+        }
+        if (img.naturalWidth && (recCanvas.width !== img.naturalWidth || recCanvas.height !== img.naturalHeight)) {
+          recCanvas.width = img.naturalWidth;
+          recCanvas.height = img.naturalHeight;
         }
         const rCtx = recCanvas.getContext('2d');
         rCtx.drawImage(img, 0, 0, recCanvas.width, recCanvas.height);
@@ -1290,11 +1324,32 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       }
     }
 
-    setInterval(() => {
-      fetch('/status').then(r => r.json()).then(d => updateUI(d)).catch(e => {});
-    }, 3000);
+    function pollStatus() {
+      fetch('/status')
+        .then(r => r.json())
+        .then(d => {
+          updateUI(d);
+          const connBadge = document.getElementById('connBadge');
+          if (connBadge) {
+            connBadge.innerText = "🟢 ONLINE";
+            connBadge.style.background = "rgba(10, 255, 150, 0.15)";
+            connBadge.style.color = "var(--green)";
+            connBadge.style.borderColor = "var(--green)";
+          }
+        })
+        .catch(e => {
+          const connBadge = document.getElementById('connBadge');
+          if (connBadge) {
+            connBadge.innerText = "🔴 OFFLINE";
+            connBadge.style.background = "rgba(255, 51, 102, 0.15)";
+            connBadge.style.color = "var(--red)";
+            connBadge.style.borderColor = "var(--red)";
+          }
+        });
+    }
 
-    fetch('/status').then(r => r.json()).then(d => updateUI(d));
+    setInterval(pollStatus, 2500);
+    pollStatus();
   </script>
 </body>
 </html>
@@ -1389,6 +1444,7 @@ void handleStatus() {
   json += "\"battery_pct\":" + String(bat.percentage) + ",";
   json += "\"battery_connected\":" + String(bat.isConnected ? "true" : "false") + ",";
   json += "\"battery_status\":\"" + bat.status + "\",";
+  json += "\"night_mode\":" + String(nightModeActive ? "true" : "false") + ",";
   json += "\"free_psram\":" + String(ESP.getFreePsram()) + ",";
   json += "\"free_heap\":" + String(ESP.getFreeHeap());
   json += "}";
@@ -1460,10 +1516,49 @@ void handleSetResolution() {
     s->set_framesize(s, FRAMESIZE_QVGA); // 320x240 - Ultra fast (30+ fps)
   } else if (res == "vga") {
     s->set_framesize(s, FRAMESIZE_VGA);  // 640x480 - High Detail
+  } else if (res == "hd") {
+    s->set_framesize(s, FRAMESIZE_HD);   // 1280x720 - Full 720p HD
   } else {
     s->set_framesize(s, FRAMESIZE_HVGA); // 480x320 - Default Smooth
   }
   server.send(200, "application/json", "{\"status\":\"ok\",\"resolution\":\"" + res + "\"}");
+}
+
+// Night Mode / Low-Light Vision Handler
+void handleSetNightMode() {
+  addCorsHeaders();
+  if (!cameraInitialized) {
+    server.send(503, "application/json", "{\"error\":\"Camera not ready\"}");
+    return;
+  }
+  sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    server.send(500, "application/json", "{\"error\":\"Sensor error\"}");
+    return;
+  }
+  if (server.hasArg("enabled")) {
+    nightModeActive = (server.arg("enabled") == "1");
+  } else {
+    nightModeActive = !nightModeActive;
+  }
+
+  if (nightModeActive) {
+    // Night Mode: Maximize AGC gain ceiling to 32X, target exposure +2, digital lift
+    s->set_gainceiling(s, GAINCEILING_32X);
+    s->set_ae_level(s, 2);
+    s->set_brightness(s, 2);
+    s->set_exposure_ctrl(s, 1);
+    s->set_gain_ctrl(s, 1);
+  } else {
+    // Normal Mode: Balanced indoor/outdoor daylight
+    s->set_gainceiling(s, GAINCEILING_16X);
+    s->set_ae_level(s, 1);
+    s->set_brightness(s, 1);
+    s->set_exposure_ctrl(s, 1);
+    s->set_gain_ctrl(s, 1);
+  }
+
+  server.send(200, "application/json", "{\"status\":\"ok\",\"night_mode\":" + String(nightModeActive ? "true" : "false") + "}");
 }
 
 // MJPEG Stream Handler with clean timeout & rapid exit
@@ -1691,6 +1786,7 @@ void setup() {
   // Connect to Wi-Fi
   Serial.printf("[WIFI] Connecting to %s...\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm); // Set MAXIMUM Wi-Fi transmission power for strong signal
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long startAttemptTime = millis();
@@ -1721,6 +1817,7 @@ void setup() {
   server.on("/deep_sleep", HTTP_GET, handleDeepSleep);
   server.on("/stream", HTTP_GET, handleStream);
   server.on("/set_resolution", HTTP_GET, handleSetResolution);
+  server.on("/set_night_mode", HTTP_GET, handleSetNightMode);
   server.on("/capture", HTTP_GET, handleCapture);
   server.on("/audio_chunk", HTTP_GET, handleAudioChunk);
   server.on("/files", HTTP_GET, handleListFiles);
