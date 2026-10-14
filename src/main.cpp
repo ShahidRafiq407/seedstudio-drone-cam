@@ -117,8 +117,8 @@ bool initCamera() {
   config.pin_reset    = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size   = FRAMESIZE_VGA;    // 640x480
-  config.jpeg_quality = 12;               // 10-63 (lower = higher quality)
+  config.frame_size   = FRAMESIZE_HVGA;   // 480x320 for ultra-smooth 25+ FPS without stutter
+  config.jpeg_quality = 14;               // 14 = lightweight (~11KB per frame)
   config.fb_count     = 2;
   config.grab_mode    = CAMERA_GRAB_LATEST;
   config.fb_location  = CAMERA_FB_IN_PSRAM;
@@ -204,6 +204,7 @@ void triggerDeepSleep(uint32_t sleepMinutes = 10) {
   if (isRecording) {
     isRecording = false;
   }
+  
   // Turn off Wi-Fi
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -531,6 +532,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </header>
 
     <div class="stream-card">
+      <div style="position: absolute; top: 10px; left: 10px; z-index: 10; display: flex; gap: 6px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.15);">
+        <button id="resQvga" class="chip-btn" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('qvga')">⚡ 320p</button>
+        <button id="resHvga" class="chip-btn active" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('hvga')">🚀 480p Smooth</button>
+        <button id="resVga" class="chip-btn" style="padding: 2px 8px; font-size: 0.72rem;" onclick="changeResolution('vga')">📷 640p HD</button>
+      </div>
       <img id="videoFeed" alt="Camera Feed">
       <div id="noFeedMsg" class="no-feed-msg">
         <span style="font-size: 2.8rem;">📷</span>
@@ -556,7 +562,11 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         </button>
       </div>
 
-      <div class="audio-rec-bar">
+      <div class="audio-rec-bar" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button id="btnPhoneVideoRec" class="phone-rec-btn" style="border-color: var(--primary); background: rgba(79, 172, 254, 0.15);" onclick="togglePhoneVideoRecording()">
+          <span>🎥</span>
+          <span id="phoneVideoRecText">Record Video to Phone</span>
+        </button>
         <button id="btnPhoneRec" class="phone-rec-btn" onclick="togglePhoneAudioRecording()">
           <span>🔴</span>
           <span id="phoneRecText">Record Audio to Phone</span>
@@ -603,6 +613,10 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       <div class="tele-item">
         <div class="tele-label">Active Mode</div>
         <div id="teleMode" class="tele-val">Standby</div>
+      </div>
+      <div class="tele-item" id="batTeleBox" title="Connect 2x 100k resistors between BAT+, A0, and GND to measure voltage">
+        <div class="tele-label">Battery Level</div>
+        <div id="teleBat" class="tele-val" style="color: #ffd166;">Checking...</div>
       </div>
       <div class="tele-item" id="sdTeleBox">
         <div class="tele-label">MicroSD Card</div>
@@ -725,6 +739,24 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     }
 
+    function changeResolution(res) {
+      document.getElementById('resQvga').classList.remove('active');
+      document.getElementById('resHvga').classList.remove('active');
+      document.getElementById('resVga').classList.remove('active');
+      if (res === 'qvga') document.getElementById('resQvga').classList.add('active');
+      else if (res === 'vga') document.getElementById('resVga').classList.add('active');
+      else document.getElementById('resHvga').classList.add('active');
+
+      fetch('/set_resolution?res=' + res)
+        .then(r => r.json())
+        .then(d => {
+          if (currentMode === 'camera' || currentMode === 'turbo') {
+            const feed = document.getElementById('videoFeed');
+            feed.src = '/stream?t=' + Date.now();
+          }
+        }).catch(e => console.error(e));
+    }
+
     async function handleModeClick(requestedMode) {
       if (isSwitching) return;
       isSwitching = true;
@@ -797,6 +829,19 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       document.getElementById('teleWifi').innerText = (status.wifi_rssi || '--') + " dBm";
       document.getElementById('teleMode').innerText = status.mode.toUpperCase();
       document.getElementById('teleRam').innerText = Math.round((status.free_psram || 0) / 1024) + " KB";
+
+      const batEl = document.getElementById('teleBat');
+      if (batEl) {
+        if (status.battery_connected) {
+          batEl.innerText = `${status.battery_v.toFixed(2)}V (${status.battery_pct}%) - ${status.battery_status}`;
+          if (status.battery_pct > 50) batEl.style.color = 'var(--green)';
+          else if (status.battery_pct > 20) batEl.style.color = '#ffd166';
+          else batEl.style.color = 'var(--red)';
+        } else {
+          batEl.innerText = status.battery_status || "No Divider on A0";
+          batEl.style.color = '#a0aec0';
+        }
+      }
 
       const sdEl = document.getElementById('teleSD');
       if (sdMounted) {
@@ -899,6 +944,101 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
       }
       document.getElementById('audioStatus').innerText = "Muted";
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Phone Video Recording (MediaRecorder + Canvas Stream)
+    let isPhoneVideoRecording = false;
+    let mediaRecorder = null;
+    let recordedVideoChunks = [];
+    let videoRecTimer = null;
+    let videoRecStartTime = 0;
+    let recCanvas = null;
+    let recDrawInterval = null;
+
+    function togglePhoneVideoRecording() {
+      if (currentMode !== 'camera' && currentMode !== 'turbo') {
+        alert("Please turn on Camera or Turbo Mode first before recording video!");
+        return;
+      }
+
+      const btn = document.getElementById('btnPhoneVideoRec');
+      const txt = document.getElementById('phoneVideoRecText');
+      const videoFeed = document.getElementById('videoFeed');
+
+      if (!isPhoneVideoRecording) {
+        isPhoneVideoRecording = true;
+        recordedVideoChunks = [];
+        videoRecStartTime = Date.now();
+        btn.classList.add('recording');
+
+        if (!recCanvas) {
+          recCanvas = document.createElement('canvas');
+          recCanvas.width = 480;
+          recCanvas.height = 320;
+        }
+        const recCtx = recCanvas.getContext('2d');
+
+        recDrawInterval = setInterval(() => {
+          if (videoFeed && videoFeed.naturalWidth) {
+            recCtx.drawImage(videoFeed, 0, 0, recCanvas.width, recCanvas.height);
+          }
+        }, 50);
+
+        const stream = recCanvas.captureStream(20);
+
+        try {
+          mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+        } catch(e) {
+          try {
+            mediaRecorder = new MediaRecorder(stream);
+          } catch(err2) {
+            alert("Video recording not supported on this browser: " + err2.message);
+            isPhoneVideoRecording = false;
+            clearInterval(recDrawInterval);
+            btn.classList.remove('recording');
+            return;
+          }
+        }
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            recordedVideoChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          clearInterval(recDrawInterval);
+          if (recordedVideoChunks.length === 0) return;
+          const blob = new Blob(recordedVideoChunks, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const now = new Date();
+          const timestamp = now.toISOString().replace(/[-:T]/g, '_').slice(0, 15);
+          a.href = url;
+          a.download = `Drone_Video_${timestamp}.webm`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        };
+
+        mediaRecorder.start(500);
+
+        videoRecTimer = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - videoRecStartTime) / 1000);
+          const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+          const s = String(elapsed % 60).padStart(2, '0');
+          txt.innerText = `⏹️ Stop Video (${m}:${s})`;
+        }, 1000);
+      } else {
+        isPhoneVideoRecording = false;
+        clearInterval(videoRecTimer);
+        btn.classList.remove('recording');
+        txt.innerText = "Record Video to Phone";
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      }
     }
 
     function togglePhoneAudioRecording() {
@@ -1155,6 +1295,29 @@ void handleDeepSleep() {
   triggerDeepSleep(mins);
 }
 
+// Dynamic Camera Resolution Handler
+void handleSetResolution() {
+  addCorsHeaders();
+  if (!cameraInitialized) {
+    server.send(503, "application/json", "{\"error\":\"Camera not ready\"}");
+    return;
+  }
+  sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    server.send(500, "application/json", "{\"error\":\"Sensor error\"}");
+    return;
+  }
+  String res = server.arg("res");
+  if (res == "qvga") {
+    s->set_framesize(s, FRAMESIZE_QVGA); // 320x240 - Ultra fast (30+ fps)
+  } else if (res == "vga") {
+    s->set_framesize(s, FRAMESIZE_VGA);  // 640x480 - High Detail
+  } else {
+    s->set_framesize(s, FRAMESIZE_HVGA); // 480x320 - Default Smooth
+  }
+  server.send(200, "application/json", "{\"status\":\"ok\",\"resolution\":\"" + res + "\"}");
+}
+
 // MJPEG Stream Handler with clean timeout & rapid exit
 void handleStream() {
   addCorsHeaders();
@@ -1164,7 +1327,8 @@ void handleStream() {
   }
 
   WiFiClient client = server.client();
-  client.setTimeout(1); // 1 second network timeout
+  client.setTimeout(2); // 2 second network timeout
+  client.setNoDelay(true); // Disable TCP Nagle algorithm for real-time streaming
   client.print("HTTP/1.1 200 OK\r\n"
                "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
                "Access-Control-Allow-Origin: *\r\n\r\n");
@@ -1176,7 +1340,7 @@ void handleStream() {
     }
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) {
-      delay(10);
+      delay(5);
       continue;
     }
 
@@ -1402,6 +1566,7 @@ void setup() {
   server.on("/take_snap", HTTP_GET, handleTakeSnap);
   server.on("/deep_sleep", HTTP_GET, handleDeepSleep);
   server.on("/stream", HTTP_GET, handleStream);
+  server.on("/set_resolution", HTTP_GET, handleSetResolution);
   server.on("/capture", HTTP_GET, handleCapture);
   server.on("/audio_chunk", HTTP_GET, handleAudioChunk);
   server.on("/files", HTTP_GET, handleListFiles);
